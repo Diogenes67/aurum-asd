@@ -766,11 +766,17 @@ Reply with ONLY the category code (e.g., "gp_referral" or "speech_report"). Noth
 
             // Check Ollama status
             useEffect(() => {
-                fetch('http://localhost:11434/api/tags')
-                    .then(r => r.json())
-                    .then(d => setStatus(d.status === 'ok' ? 'ready' : 'no-model'))
-                    .catch(() => setStatus('offline'));
-            }, []);
+                // Cloud mode uses HuggingFace API - always ready
+                if (useCloudExtract) {
+                    setStatus('ready');
+                } else {
+                    // Local mode checks for Ollama
+                    fetch('http://localhost:11434/api/tags')
+                        .then(r => r.json())
+                        .then(d => setStatus(d.status === 'ok' ? 'ready' : 'no-model'))
+                        .catch(() => setStatus('offline'));
+                }
+            }, [useCloudExtract]);
 
             // Timer
             useEffect(() => {
