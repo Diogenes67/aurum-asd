@@ -1,0 +1,3134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASD Assessment Workflow — Aurum (AU) v0.11</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        harbour: { 50: '#e8f4fc', 100: '#c5e3f6', 200: '#8ec9ed', 300: '#4fa8db', 400: '#2b7eb8', 500: '#1a5a8a', 600: '#144a70', 700: '#0f3a57' },
+                        teal: { 50: '#e6f7f7', 100: '#c2ebeb', 200: '#8ad9d9', 300: '#4fc4c4', 400: '#2da8a8', 500: '#1f8585', 600: '#186868' },
+                        gold: { 50: '#fef9e6', 100: '#fdf0bf', 200: '#fae485', 300: '#f5d24a', 400: '#e8b830', 500: '#c9971f', 600: '#a67a18' },
+                        coral: { 50: '#fdf2f4', 100: '#fbe3e7', 200: '#f5c6ce', 300: '#e89aa8', 400: '#d4707f', 500: '#b84d5c' },
+                        sage: { 50: '#eef6f0', 100: '#d4eada', 200: '#a8d5b3', 300: '#6fb87f', 400: '#4a9a5a', 500: '#357a43' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-image: url('mosaic_bg.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+
+        .glass-card {
+            background: rgba(255,255,255,0.94);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255,255,255,0.4);
+        }
+        .glass-header {
+            background: rgba(201,151,31,0.95);
+            backdrop-filter: blur(12px);
+        }
+        .glass-nav {
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(12px);
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1s linear infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .highlight { background-color: #fae485; padding: 2px 4px; border-radius: 2px; }
+        
+        /* Markdown styling for case note */
+        .markdown-content h1 { font-size: 1.5rem; font-weight: 700; margin: 1.5rem 0 0.75rem; color: #0f3a57; }
+        .markdown-content h2 { font-size: 1.25rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: #144a70; }
+        .markdown-content h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #1a5a8a; }
+        .markdown-content p { margin: 0.5rem 0; line-height: 1.7; }
+        .markdown-content ul, .markdown-content ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+        .markdown-content li { margin: 0.25rem 0; line-height: 1.6; }
+        .markdown-content strong { font-weight: 600; color: #0f3a57; }
+        .markdown-content em { font-style: italic; }
+        .markdown-content hr { border: none; border-top: 1px solid #c5e3f6; margin: 1rem 0; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const MODELS = {
+            'llama-3.3-70b': 'meta-llama/llama-3.3-70b-instruct'
+        };
+
+        const DSM5_CRITERIA = {
+            A1: {
+                name: "Social-Emotional Reciprocity",
+                description: "Deficits in social-emotional reciprocity, ranging from abnormal social approach and failure of normal back-and-forth conversation; to reduced sharing of interests, emotions, or affect; to failure to initiate or respond to social interactions.",
+                lookFor: `SOCIAL APPROACH: How do they approach familiar/unfamiliar people? Do they invite others to play? Join groups? Response when approached? Response to name being called (friendly, aloof, in own world)? Unusual social initiations? Personal space issues? Using others as tools? Inappropriate behaviour for social situations?
+BACK-AND-FORTH CONVERSATION: One-sided conversations? Monologues? Only talks about own interests? Tangents/lack of context? Talks too much or too little? Cant be interrupted? Directs adults what to say? Pedantic or "little professor" style?
+SHARING INTERESTS/ENJOYMENT: Spontaneously shows/brings/points out objects of interest? Points with gaze-switch? Shares excitement/achievements? Responsive social smile? Seeks comfort when upset? Offers comfort to others? Response to praise? Pleasure in social interactions?
+EMOTIONAL UNDERSTANDING: Understands simple emotions (happy, sad, angry)? Complex emotions (embarrassment, guilt)? Empathy? Aversion to physical contact/affection?`
+            },
+            A2: {
+                name: "Nonverbal Communication",
+                description: "Deficits in nonverbal communicative behaviors used for social interaction, ranging from poorly integrated verbal and nonverbal communication; to abnormalities in eye contact and body language or deficits in understanding and use of gestures; to a total lack of facial expressions and nonverbal communication.",
+                lookFor: `EYE CONTACT: Quality during play/conversations/requests? With strangers vs familiar people? Unusually intense or avoidant? Gaze switching present? Integrated with speech?
+GESTURES: Uses nodding/shaking head, shrugging, pointing, descriptive gestures? Understands others' gestures? Follows a point? Uses others as tools instead of gestures?
+FACIAL EXPRESSIONS: Limited range? Exaggerated? Mismatch between expression and emotion? Warm joyful expressions directed at others? Can read others' facial expressions?
+BODY LANGUAGE: Orientation towards others? Personal space (too close/far)? Posture matches emotion? Integration of speech, eye contact, gestures together?
+JOINT ATTENTION: Present? Reduced? Absent?`
+            },
+            A3: {
+                name: "Relationships",
+                description: "Deficits in developing, maintaining, and understanding relationships, ranging from difficulties adjusting behavior to suit various social contexts; to difficulties in sharing imaginative play or in making friends; to absence of interest in peers.",
+                lookFor: `PEER INTEREST: Interest in peers? Withdrawn, aloof, "in own world"? Prefers solitary play? Solitary vs parallel vs cooperative play? Plays with older/younger children?
+FRIENDSHIPS: Can establish/maintain friendships? Preferred friends? Overly clingy? Expects exclusive friendships? Directive or rigid in play? Invited to playdates/parties? Requests playdates?
+PERSPECTIVE-TAKING: Sees things from another's point of view? Understands effect of actions on others? Sincerely apologizes? Notices if excluded/teased?
+SOCIAL CONTEXT: Responds to social cues (someone getting irritated)? Adjusts behaviour to contexts (whispering in library)? Understands social conventions (queuing)? Appropriate respect to adults? Socially inappropriate comments?
+IMAGINATIVE PLAY: Symbolic/representational play? Social role-play? Imaginative play with peers? Original play themes or scripts from TV?`
+            },
+            B1: {
+                name: "Stereotyped/Repetitive Movements, Speech, Object Use",
+                description: "Stereotyped or repetitive motor movements, use of objects, or speech (e.g., simple motor stereotypies, lining up toys or flipping objects, echolalia, idiosyncratic phrases).",
+                lookFor: `SPEECH: Pedantic or unusually formal "little professor" language? Echolalia (repeats words/phrases/songs)? Repeated learned phrases? Idiosyncratic language only meaningful to those who know them? Repetitive vocalisations (guttural sounds, unusual squealing, humming)? Unusual prosody (pitch/rate/accent)? Cannot interpret figurative speech/sarcasm? Pronoun reversal?
+MOTOR MOVEMENTS: Hand movements (clapping, flicking, flapping, twisting)? Whole body (rocking, dipping, swaying, spinning)? Posture (toe walking, body posturing, stiffening)? Facial grimacing? Teeth grinding?
+OBJECT USE: Nonfunctional play (waving sticks, dropping items)? Lining up or sorting toys? Opening/closing doors, lights on/off, spinning objects? Repetitive sequences in play? Collections that aren't used as intended? Repetitively posting objects, pressing buttons?`
+            },
+            B2: {
+                name: "Insistence on Sameness/Routines",
+                description: "Insistence on sameness, inflexible adherence to routines, or ritualized patterns of verbal or nonverbal behavior (e.g., extreme distress at small changes, difficulties with transitions, rigid thinking patterns, greeting rituals, need to take same route or eat same food every day).",
+                lookFor: `SAMENESS: Insists things done the same way (same route, meals prepared same way)? Things child has to say/do at particular times? Routines must be in certain order? Distressed if altered? Arrangements of toys, bedcovers, same chair/plate?
+TRANSITIONS: Cant change activity until finished without distress? Difficulties with transitions between environments? Changes of plan? Coping with visitors? How react if see someone outside "usual" environment?
+RITUALS: Specific unusual multi-step sequences? Repetitive questioning about particular topic? Compulsions (e.g. turning in circle before entering room)?
+RIGIDITY: Perfectionistic with certain tasks? Rigid expectations with following rules? Follows own agenda?`
+            },
+            B3: {
+                name: "Restricted Interests",
+                description: "Highly restricted, fixated interests that are abnormal in intensity or focus (e.g., strong attachment to or preoccupation with unusual objects, excessively circumscribed or perseverative interests).",
+                lookFor: `INTENSITY: Unusual or intense interests/preoccupations/obsessions? Takes up a lot of time daily? Interferes with child's functioning or family's? Interest consistent across activities (talks, reads, watches videos, draws about topic)?
+NARROW FOCUS: Numbers, letters, symbols, nature, specific toy/TV show? Collecting facts or statistics? Skills in narrow areas higher than general skills?
+ATTACHMENTS: Must carry around specific or unusual objects (not common attachment objects)? Unusual fears?
+FOCUS ON PARTS: Excessively focused on nonrelevant or nonfunctional parts of objects?`
+            },
+            B4: {
+                name: "Sensory Differences",
+                description: "Hyper- or hyporeactivity to sensory input or unusual interest in sensory aspects of the environment (e.g., apparent indifference to pain/temperature, adverse response to specific sounds or textures, excessive smelling or touching of objects, visual fascination with lights or movement).",
+                lookFor: `VISUAL: Fixation on spinning objects (wheels, fans)? Looks at parts of faces? Looking from close up or unusual angle/corner of eye? Fascination with lights, shiny objects? Sensitive to bright lights?
+AUDITORY: Over-reacts to everyday sounds (blender, vacuum)? Struggles in noisy environments? Under-responsive to sounds?
+SMELL: Sniffing non-food items? Sniffing food before eating? Upset by specific smells?
+TOUCH: Atypical response to pain or temperature? Seeks certain textures? Aversion to textures (tactile defensiveness)? Significant dislike of haircuts, toenails cut, teeth brushed? Issues with clothing/tags? Dislike of dirty/sticky hands?
+TASTE: Mouthing/licking objects? Significantly restricted diet? Pica?
+MOVEMENT: Over-active? Under-active? Cant settle to sleep? Seeks movement? Uncoordinated/"clumsy"?
+SAFETY/FEAR: Risk-taking without fear? Appears fearful or cautious?`
+            },
+            C: {
+                name: "Early Developmental Period",
+                description: "Symptoms must be present in the early developmental period (but may not become fully manifest until social demands exceed limited capacities, or may be masked by learned strategies in later life).",
+                lookFor: `When were concerns first noted? By whom? What were early signs? Language delays? Social differences in toddlerhood? Early developmental milestones? Did symptoms become more apparent as social demands increased (e.g., starting school)? Evidence of masking or camouflaging? Regression noted?`
+            },
+            D: {
+                name: "Clinically Significant Impairment",
+                description: "Symptoms cause clinically significant impairment in social, occupational, or other important areas of current functioning.",
+                lookFor: `SOCIAL IMPACT: Difficulty making/keeping friends? Social isolation? Bullying/teasing? Family stress?
+EDUCATIONAL/OCCUPATIONAL: Learning difficulties? Needs support at school? Attendance issues? Behaviour problems at school? Unable to participate in activities?
+DAILY LIVING: Self-care difficulties? Sleep problems? Eating difficulties? Safety concerns? Family routines disrupted?
+EMOTIONAL: Anxiety? Depression? Meltdowns? Emotional dysregulation?`
+            },
+            E: {
+                name: "Not Better Explained by ID/GDD",
+                description: "These disturbances are not better explained by intellectual disability (intellectual developmental disorder) or global developmental delay. Intellectual disability and autism spectrum disorder frequently co-occur; to make comorbid diagnoses of autism spectrum disorder and intellectual disability, social communication should be below that expected for general developmental level.",
+                lookFor: `Cognitive assessment results? IQ/developmental level? Are social-communication difficulties BELOW what would be expected for their cognitive/developmental level? If ID present, are ASD features in excess of what ID alone would explain? Hearing and vision ruled out as causes?`
+            }
+        };
+
+        const criteriaInfo = {
+            A1: { name: "Social-Emotional Reciprocity", color: "gold", desc: "Social approach, back-and-forth conversation, sharing interests/enjoyment, emotional understanding" },
+            A2: { name: "Nonverbal Communication", color: "gold", desc: "Eye contact, gestures, facial expressions, body language integration" },
+            A3: { name: "Relationships", color: "gold", desc: "Peer interest, friendships, perspective-taking, social context, imaginative play" },
+            B1: { name: "Stereotyped/Repetitive", color: "teal", desc: "Repetitive speech, motor movements, object use" },
+            B2: { name: "Insistence on Sameness", color: "teal", desc: "Routines, transitions, rituals, rigidity" },
+            B3: { name: "Restricted Interests", color: "teal", desc: "Intense/unusual interests, narrow focus, attachments" },
+            B4: { name: "Sensory Differences", color: "teal", desc: "Visual, auditory, smell, touch, taste, movement sensitivities" },
+            C: { name: "Early Developmental Period", color: "coral", desc: "Symptoms present early, even if masked or manifest later" },
+            D: { name: "Clinically Significant Impairment", color: "coral", desc: "Impact on social, educational, daily living, emotional functioning" },
+            E: { name: "Not Better Explained by ID/GDD", color: "coral", desc: "Social communication below expected for developmental level" }
+        };
+
+        // Document categories for pre-assessment checklist
+        const DOCUMENT_CATEGORIES = {
+            'Referral & Medical': [
+                { id: 'gp_referral', name: 'GP/Paediatrician referral letter', critical: true, action: 'REQUEST before assessment' },
+                { id: 'medical_history', name: 'Medical history summary', critical: false, action: 'ASK IN INTERVIEW' },
+                { id: 'hearing_test', name: 'Hearing test results', critical: true, action: '⚠️ REFER NOW — cannot diagnose ASD without ruling out' },
+                { id: 'vision_test', name: 'Vision test results', critical: false, action: 'Refer if concerns' },
+                { id: 'medications', name: 'Medication list', critical: false, action: 'ASK IN INTERVIEW' },
+                { id: 'previous_diagnoses', name: 'Previous diagnoses documentation', critical: false, action: 'ASK IN INTERVIEW' }
+            ],
+            'Developmental History': [
+                { id: 'dev_history', name: 'Developmental history form (parent)', critical: true, action: 'SEND TO PARENT / extend interview' },
+                { id: 'baby_book', name: 'Baby health book / milestone record', critical: false, action: 'ASK PARENT TO BRING' },
+                { id: 'early_intervention', name: 'Early intervention reports', critical: false, action: 'REQUEST' }
+            ],
+            'School / Education': [
+                { id: 'teacher_questionnaire', name: 'Teacher questionnaire', critical: true, action: '⚠️ SEND TO SCHOOL — need multi-context evidence' },
+                { id: 'school_reports', name: 'School reports (last 2 years)', critical: false, action: 'REQUEST from parent/school' },
+                { id: 'iep', name: 'Learning support notes / IEP', critical: false, action: 'REQUEST' },
+                { id: 'school_observation', name: 'School observation', critical: false, action: 'SCHEDULE if needed' },
+                { id: 'naplan', name: 'NAPLAN results', critical: false, action: 'ASK parent' }
+            ],
+            'Previous Assessments': [
+                { id: 'speech_report', name: 'Speech pathology report', critical: false, action: 'REQUEST' },
+                { id: 'ot_report', name: 'Occupational therapy report', critical: false, action: 'REQUEST' },
+                { id: 'psych_report', name: 'Psychology report', critical: false, action: 'REQUEST' },
+                { id: 'cognitive_assessment', name: 'Cognitive/IQ assessment', critical: false, action: 'REQUEST/DO' },
+                { id: 'previous_asd', name: 'Previous autism assessment', critical: true, action: 'REQUEST — avoid duplication' }
+            ],
+            'Parent Questionnaires': [
+                { id: 'sensory_parent', name: 'Sensory Profile (parent)', critical: false, action: 'SEND TO PARENT' },
+                { id: 'adaptive', name: 'Adaptive behaviour (Vineland-3/ABAS-3)', critical: false, action: 'PLAN' },
+                { id: 'srs_parent', name: 'SRS-2 (parent)', critical: false, action: 'SEND TO PARENT' },
+                { id: 'scq', name: 'SCQ (parent)', critical: false, action: 'SEND TO PARENT' }
+            ],
+            'Teacher Questionnaires': [
+                { id: 'teacher_obs', name: 'Teacher observation form', critical: false, action: 'SEND TO SCHOOL' },
+                { id: 'sensory_teacher', name: 'Sensory Profile (teacher)', critical: false, action: 'SEND TO SCHOOL' },
+                { id: 'srs_teacher', name: 'SRS-2 (teacher)', critical: false, action: 'SEND TO SCHOOL' }
+            ]
+        };
+
+        // API Functions - Using backend server
+        async function callLLM(prompt, model, maxTokens = 3000, useCloud = true) {
+            const res = await fetch(useCloud ? '/api/extract-hf' : '/api/extract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model, text: prompt })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Extraction failed');
+            return data.response?.trim() || '';
+        }
+        
+        // Two-stage extraction via backend
+        async function extractTwoStage(documents) {
+            const res = await fetch('/api/extract_twostage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ documents })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Extraction failed');
+            return data;
+        }
+        
+        // Check server status
+        async function checkServerStatus() {
+            try {
+                const res = await fetch('/api/status', { method: 'POST' });
+                const data = await res.json();
+                return data.status === 'ok';
+            } catch {
+                return false;
+            }
+        }
+
+        async function extractEvidence(text, model, useCloud = false) {
+            // Send text to backend for extraction
+            const res = await fetch(useCloud ? '/api/extract-hf' : '/api/extract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model, text })
+            });
+            
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            
+            if (!data.success) throw new Error(data.error || 'Extraction failed');
+            
+            let response = data.response || '';
+            console.log('Raw response:', response);
+            
+            // Try to extract JSON from response
+            response = response.replace(/```json/g, '').replace(/```/g, '').trim();
+            
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                console.error('No JSON found in response');
+                throw new Error('No JSON found in response');
+            }
+            
+            try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                
+                // Validate that we didn't get the template back
+                if (parsed.A1?.supporting?.includes("quote1") || parsed.A1?.supporting?.includes("quote2")) {
+                    console.error('Model returned template instead of real quotes');
+                    throw new Error('Model returned template - try with 27b model or different document');
+                }
+                
+                return parsed;
+            } catch (e) {
+                console.error('JSON parse error:', e, 'Response:', jsonMatch[0]);
+                throw new Error('Invalid JSON in response');
+            }
+        }
+        
+        // Prescan documents for pre-assessment checklist
+        async function runPrescan(documents) {
+            const docMap = {};
+            for (const file of documents) {
+                docMap[file.name] = file.text;
+            }
+            
+            const res = await fetch('/api/prescan-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ documents: docMap, useCloud: true })
+            });
+            
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            
+            if (!data.success) throw new Error(data.error || 'Prescan failed');
+            return data.metadata;
+        }
+        
+        // Apply prescan results to checklist
+        function applyPrescanToChecklist(metadata, setChecklist) {
+            const newChecklist = {};
+            
+            const mappings = {
+                'referral_medical': ['gp_referral', 'medical_history', 'hearing_test', 'vision_test', 'medications', 'previous_diagnoses'],
+                'developmental_history': ['dev_history', 'baby_book', 'early_intervention'],
+                'school_education': ['teacher_questionnaire', 'school_reports', 'iep', 'school_observation', 'naplan'],
+                'previous_assessments': ['speech_report', 'ot_report', 'psych_report', 'cognitive_assessment', 'previous_asd'],
+                'parent_questionnaires': ['sensory_parent', 'adaptive', 'srs_parent', 'scq'],
+                'teacher_questionnaires': ['teacher_obs', 'sensory_teacher', 'srs_teacher']
+            };
+            
+            for (const [category, items] of Object.entries(mappings)) {
+                const catData = metadata[category] || {};
+                for (const id of items) {
+                    const item = catData[id];
+                    if (item && item.status) {
+                        if (item.status === 'present' || item.status === 'normal') {
+                            newChecklist[id] = 'have';
+                        } else if (item.status === 'missing') {
+                            newChecklist[id] = 'missing';
+                        } else if (['none', 'na', 'never_assessed', 'never_done'].includes(item.status)) {
+                            newChecklist[id] = 'na';
+                        }
+                    }
+                }
+            }
+            
+            setChecklist(prev => ({ ...prev, ...newChecklist }));
+        }
+
+        async function generateCaseNote(evidence, clientInfo, functionalAssessment, diagnosticDecisions, model) {
+            // Format evidence quotes for each criterion
+            const formatEvidence = (code) => {
+                const quotes = evidence[code]?.quotes || [];
+                if (quotes.length === 0) return `${code}: No evidence extracted`;
+                return `${code}:\n` + quotes.map(q => {
+                    const text = typeof q === 'string' ? q : q.text;
+                    const source = typeof q === 'string' ? '' : ` [${q.source}]`;
+                    return `  - "${text}"${source}`;
+                }).join('\n');
+            };
+
+            // Format functional assessment
+            const formatFunctional = () => {
+                const domains = [
+                    { key: 'strengths', label: 'Strengths/Interests' },
+                    { key: 'medical', label: 'Medical/Physical' },
+                    { key: 'cognitive', label: 'Cognitive/Learning' },
+                    { key: 'speech', label: 'Speech/Language/Communication' },
+                    { key: 'motor', label: 'Motor Skills' },
+                    { key: 'social', label: 'Social Communication' },
+                    { key: 'emotional', label: 'Emotional Regulation' },
+                    { key: 'attention', label: 'Attention/Executive Function' },
+                    { key: 'adaptive', label: 'Adaptive/Daily Living' },
+                    { key: 'background', label: 'Background/History' }
+                ];
+                return domains.map(d => {
+                    const text = functionalAssessment[d.key]?.text || 'Not assessed';
+                    return `${d.label}: ${text}`;
+                }).join('\n\n');
+            };
+
+            // Format diagnostic decisions
+            const formatDecisions = () => {
+                const criteria = ['A1','A2','A3','B1','B2','B3','B4','C','D','E'];
+                return criteria.map(c => {
+                    const d = diagnosticDecisions[c] || {};
+                    const status = d.met === 'met' ? '✓ MET' : d.met === 'not_met' ? '✗ NOT MET' : '? INSUFFICIENT';
+                    const notes = d.notes ? ` (${d.notes})` : '';
+                    return `${c}: ${status}${notes}`;
+                }).join('\n');
+            };
+
+            // Format co-occurring diagnoses
+            const formatCoOccurring = () => {
+                const co = diagnosticDecisions.coOccurring || {};
+                const selected = [];
+                if (co.globalDelay) selected.push('Global Developmental Delay (315.8)');
+                if (co.intellectualDisability) selected.push(`Intellectual Disability (319) - ${co.intellectualDisabilityLevel || 'severity TBD'}`);
+                if (co.languageDisorder) selected.push('(Developmental) Language Disorder (315.39)');
+                if (co.pragmaticDisorder) selected.push('Social (Pragmatic) Communication Disorder (315.39)');
+                if (co.coordinationDisorder) selected.push('Developmental Coordination Disorder (315.4)');
+                if (co.adhd) selected.push(`ADHD (${co.adhdType || 'type TBD'})`);
+                if (co.learningDisorder) selected.push('Specific Learning Disorder');
+                if (co.fasd) selected.push('FASD (315.8)');
+                if (co.sensoryProcessing) selected.push('Sensory processing difficulties');
+                if (co.motorDelays) selected.push('Fine/gross motor delays');
+                if (co.languageDelays) selected.push('Delayed receptive/expressive language');
+                if (co.anxietyDepression) selected.push('Features of Anxiety/Depression');
+                if (co.complexTrauma) selected.push('Complex trauma/social-emotional history');
+                if (co.atRiskOf) selected.push(`At risk of: ${co.atRiskOf}`);
+                return selected.length > 0 ? selected.join('\n') : 'None identified';
+            };
+
+            // Calculate ASD outcome
+            const aMet = ['A1','A2','A3'].filter(c => diagnosticDecisions[c]?.met === 'met').length;
+            const bMet = ['B1','B2','B3','B4'].filter(c => diagnosticDecisions[c]?.met === 'met').length;
+            const cMet = diagnosticDecisions.C?.met === 'met';
+            const dMet = diagnosticDecisions.D?.met === 'met';
+            const eMet = diagnosticDecisions.E?.met === 'met';
+            const meetsASD = aMet === 3 && bMet >= 2 && cMet && dMet && eMet;
+
+            const asdOutcome = meetsASD 
+                ? `Based on clinician review, ${clientInfo.name || 'the client'} MEETS DSM-5 criteria for Autism Spectrum Disorder (299.00).
+   - Social Communication Level: ${diagnosticDecisions.socialLevel || 'Not specified'}
+   - Restricted/Repetitive Behaviours Level: ${diagnosticDecisions.behaviourLevel || 'Not specified'}`
+                : `Based on clinician review, ${clientInfo.name || 'the client'} does NOT fully meet DSM-5 criteria for Autism Spectrum Disorder.
+   - Criterion A: ${aMet}/3 met (all 3 required)
+   - Criterion B: ${bMet}/4 met (2+ required)
+   - Criteria C/D/E: ${cMet ? '✓' : '✗'}/${dMet ? '✓' : '✗'}/${eMet ? '✓' : '✗'}`;
+
+            const prompt = `Write a professional neurodevelopmental assessment case note using the CAT (Children's Assessment Team) format.
+
+CLIENT INFORMATION:
+Name: ${clientInfo.name || '[Name]'}
+DOB: ${clientInfo.dob || '[DOB]'}
+Age: ${clientInfo.age || '[Age]'}
+Assessment Date: ${clientInfo.assessmentDate || '[Date]'}
+Reviewer: ${clientInfo.reviewer || '[Reviewer]'}
+
+FUNCTIONAL ASSESSMENT (ICF Domains):
+${formatFunctional()}
+
+DSM-5 EVIDENCE EXTRACTED:
+${['A1','A2','A3','B1','B2','B3','B4','C','D','E'].map(formatEvidence).join('\n\n')}
+
+CLINICIAN DIAGNOSTIC DECISIONS:
+${formatDecisions()}
+
+ASD DIAGNOSTIC OUTCOME:
+${asdOutcome}
+
+CO-OCCURRING/DIFFERENTIAL DIAGNOSES:
+${formatCoOccurring()}
+
+---
+
+Write a professional case note with these sections:
+
+## Neurodevelopmental Assessment Report
+
+### Client Information
+Brief demographics and reason for referral.
+
+### Background
+Relevant developmental history, medical history, and current situation from the functional assessment.
+
+### Functional Assessment
+Summarise each ICF domain based on the functional assessment data provided.
+
+### DSM-5 Criteria Analysis
+
+#### Criterion A: Social Communication & Interaction
+For A1, A2, A3 - present the evidence and note the clinician's determination.
+
+#### Criterion B: Restricted, Repetitive Behaviours
+For B1, B2, B3, B4 - present the evidence and note the clinician's determination.
+
+#### Criteria C, D, E
+Present evidence for early developmental period, functional impairment, and differential diagnosis.
+
+### Formulation
+State the diagnostic outcome as determined by the clinician. Include severity levels if ASD criteria met.
+List any co-occurring diagnoses identified.
+
+### Recommendations
+5-7 specific, actionable recommendations based on the assessment findings.
+
+IMPORTANT: 
+- Use the clinician's diagnostic decisions as stated - do not re-interpret the evidence
+- Use neurodiversity-affirming language throughout
+- Be specific and include quotes where relevant
+- Keep recommendations practical and family-centred`;
+
+            return await callLLM(prompt, model);
+        }
+
+        // File Parsing
+        async function parseDocx(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const result = await mammoth.extractRawText({ arrayBuffer: e.target.result });
+                        resolve(result.value);
+                    } catch (err) { reject(err); }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        async function parseTxt(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsText(file);
+            });
+        }
+
+        async function parsePdf(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const pdf = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+                        let text = '';
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const content = await page.getTextContent();
+                            text += content.items.map(item => item.str).join(' ') + '\n';
+                        }
+                        resolve(text);
+                    } catch (err) { reject(err); }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // Auto-detect document type from filename (fallback)
+        function detectDocumentTypeFromFilename(filename) {
+            const lower = filename.toLowerCase();
+            if (lower.includes('gp') || lower.includes('referral') || lower.includes('paed')) return 'gp_referral';
+            if (lower.includes('hearing') || lower.includes('audio')) return 'hearing_test';
+            if (lower.includes('speech') || lower.includes('slp')) return 'speech_report';
+            if (lower.includes('ot') || lower.includes('occupational')) return 'ot_report';
+            if (lower.includes('psych')) return 'psych_report';
+            if (lower.includes('teacher') || lower.includes('school')) return 'teacher_questionnaire';
+            if (lower.includes('sensory')) return 'sensory_parent';
+            if (lower.includes('developmental') || lower.includes('history')) return 'dev_history';
+            if (lower.includes('vineland') || lower.includes('abas') || lower.includes('adaptive')) return 'adaptive';
+            if (lower.includes('srs')) return lower.includes('teacher') ? 'srs_teacher' : 'srs_parent';
+            if (lower.includes('scq')) return 'scq';
+            if (lower.includes('conners') || lower.includes('adhd')) return 'psych_report';
+            if (lower.includes('vision') || lower.includes('eye')) return 'vision_test';
+            if (lower.includes('iep') || lower.includes('learning support')) return 'iep';
+            if (lower.includes('naplan')) return 'naplan';
+            return null;
+        }
+
+        // Content-based document classification using Llama 3.3
+        async function classifyDocumentContent(text, model) {
+            const preview = text.slice(0, 1500); // First 1500 chars for classification
+            
+            const prompt = `Classify this clinical document. Read the content and determine which ONE category it belongs to.
+
+CATEGORIES:
+gp_referral - GP or paediatrician referral letter
+hearing_test - Audiological/hearing assessment
+vision_test - Vision/eye test results
+speech_report - Speech pathology report
+ot_report - Occupational therapy report
+psych_report - Psychology report or cognitive assessment
+teacher_questionnaire - Teacher questionnaire or school report about the child
+dev_history - Developmental history from parent
+sensory_parent - Sensory profile completed by parent
+sensory_teacher - Sensory profile completed by teacher
+adaptive - Adaptive behaviour assessment (Vineland, ABAS)
+srs_parent - SRS-2 completed by parent
+srs_teacher - SRS-2 completed by teacher
+scq - Social Communication Questionnaire
+school_reports - General school reports or IEP
+medical_history - Medical history summary
+previous_asd - Previous autism assessment
+other - Does not fit any category
+
+DOCUMENT CONTENT:
+${preview}
+
+Reply with ONLY the category code (e.g., "gp_referral" or "speech_report"). Nothing else.`;
+
+            try {
+                const response = await callLLM(prompt, model, 50);
+                const category = response.trim().toLowerCase().replace(/[^a-z_]/g, '');
+                
+                // Validate it's a known category
+                const validCategories = ['gp_referral', 'hearing_test', 'vision_test', 'speech_report', 'ot_report', 
+                    'psych_report', 'teacher_questionnaire', 'dev_history', 'sensory_parent', 'sensory_teacher',
+                    'adaptive', 'srs_parent', 'srs_teacher', 'scq', 'school_reports', 'medical_history', 
+                    'previous_asd', 'other', 'cognitive_assessment', 'teacher_obs'];
+                
+                if (validCategories.includes(category)) {
+                    return category;
+                }
+                // Try to match partial
+                for (const valid of validCategories) {
+                    if (category.includes(valid) || valid.includes(category)) {
+                        return valid;
+                    }
+                }
+                return null;
+            } catch (e) {
+                console.error('Classification error:', e);
+                return null;
+            }
+        }
+
+        // Progress Modal
+        function ProgressModal({ isOpen, stage, elapsed, model }) {
+            if (!isOpen) return null;
+            
+            const is27b = model?.includes('27b');
+            const stages = {
+                'classifying': { icon: '📂', title: 'Classifying Documents', estimate: '5-15 sec per file' },
+                'extracting': { icon: '🔍', title: 'Extracting DSM-5 Evidence', estimate: is27b ? '1-2 min' : '15-30 sec' },
+                'generating': { icon: '📝', title: 'Generating Case Note', estimate: is27b ? '30-60 sec' : '10-20 sec' }
+            };
+            
+            const current = stages[stage] || stages.extracting;
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="glass-card rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4">
+                        <div className="text-center">
+                            <div className="text-6xl mb-4 animate-pulse">{current.icon}</div>
+                            <h3 className="text-xl font-bold text-harbour-700 mb-2">{current.title}</h3>
+                            <p className="text-harbour-500 text-sm mb-4">Using Llama 3.3 70B locally</p>
+                            
+                            <div className="flex justify-center mb-4">
+                                <svg className="animate-spin h-8 w-8 text-teal-500" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                </svg>
+                            </div>
+                            
+                            <div className="bg-harbour-50 rounded-xl p-4">
+                                <p className="text-sm text-harbour-500">Time elapsed</p>
+                                <p className="text-2xl font-mono font-bold text-harbour-700">{mins}:{secs.toString().padStart(2, '0')}</p>
+                                <p className="text-xs text-harbour-400 mt-1">Est: {current.estimate}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Main App
+        function App() {
+            const [screen, setScreen] = useState(1);
+            const [status, setStatus] = useState('checking');
+            const [selectedModel, setSelectedModel] = useState('llama-3.3-70b');
+            const [useCloudExtract, setUseCloudExtract] = useState(true); // Toggle for HuggingFace API - default cloud
+            
+            // Client info
+            const [clientInfo, setClientInfo] = useState({ name: '', dob: '', age: '', assessmentDate: '', reviewer: '' });
+            
+            // Files
+            const [files, setFiles] = useState([]);
+            
+            // Pre-assessment checklist
+            const [checklist, setChecklist] = useState({});
+            const [checklistNotes, setChecklistNotes] = useState({});
+            
+            // Prescan results from AI
+            const [prescanData, setPrescanData] = useState(null);
+            const [prescanLoading, setPrescanLoading] = useState(false);
+            
+            // Evidence
+            const [evidence, setEvidence] = useState({A1:{quotes:[]},A2:{quotes:[]},A3:{quotes:[]},B1:{quotes:[]},B2:{quotes:[]},B3:{quotes:[]},B4:{quotes:[]},C:{quotes:[]},D:{quotes:[]},E:{quotes:[]}});
+            
+
+            // Quote editing functions
+            const deleteQuote = (criterion, index) => {
+                setEvidence(prev => ({
+                    ...prev,
+                    [criterion]: { quotes: prev[criterion].quotes.filter((_, i) => i !== index) }
+                }));
+            };
+
+            const editQuote = (criterion, index, newText) => {
+                setEvidence(prev => ({
+                    ...prev,
+                    [criterion]: {
+                        quotes: prev[criterion].quotes.map((q, i) =>
+                            i === index ? { ...q, text: newText } : q
+                        )
+                    }
+                }));
+            };
+
+            const addQuote = (criterion, text, source = "Manual entry") => {
+                setEvidence(prev => ({
+                    ...prev,
+                    [criterion]: { quotes: [...prev[criterion].quotes, { text, source }] }
+                }));
+            };
+            // Case note
+            const [caseNote, setCaseNote] = useState('');
+
+            // Functional Assessment (AI-extracted, clinician-reviewed)
+            const [functionalAssessment, setFunctionalAssessment] = useState({
+                strengths: { text: "", reviewed: false, aiGenerated: false },
+                medical: { text: "", reviewed: false, aiGenerated: false },
+                cognitive: { text: "", reviewed: false, aiGenerated: false },
+                speech: { text: "", reviewed: false, aiGenerated: false },
+                motor: { text: "", reviewed: false, aiGenerated: false },
+                social: { text: "", reviewed: false, aiGenerated: false },
+                emotional: { text: "", reviewed: false, aiGenerated: false },
+                attention: { text: "", reviewed: false, aiGenerated: false },
+                adaptive: { text: "", reviewed: false, aiGenerated: false },
+                background: { text: "", reviewed: false, aiGenerated: false }
+            });
+
+            // Diagnostic Decisions (AI suggests based on evidence, clinician confirms/changes)
+            const [diagnosticDecisions, setDiagnosticDecisions] = useState({
+                A1: { met: null, aiSuggested: null, notes: "" },
+                A2: { met: null, aiSuggested: null, notes: "" },
+                A3: { met: null, aiSuggested: null, notes: "" },
+                B1: { met: null, aiSuggested: null, notes: "" },
+                B2: { met: null, aiSuggested: null, notes: "" },
+                B3: { met: null, aiSuggested: null, notes: "" },
+                B4: { met: null, aiSuggested: null, notes: "" },
+                C: { met: null, aiSuggested: null, notes: "" },
+                D: { met: null, aiSuggested: null, notes: "" },
+                E: { met: null, aiSuggested: null, notes: "" },
+                socialLevel: "",
+                behaviourLevel: "",
+                overallImpression: "",
+                coOccurring: {
+                    globalDelay: false,
+                    intellectualDisability: false,
+                    intellectualDisabilityLevel: "",
+                    languageDisorder: false,
+                    pragmaticDisorder: false,
+                    speechSoundDisorder: false,
+                    fluencyDisorder: false,
+                    coordinationDisorder: false,
+                    adhd: false,
+                    adhdType: "",
+                    learningDisorder: false,
+                    learningDisorderTypes: [],
+                    fasd: false,
+                    sensoryProcessing: false,
+                    motorDelays: false,
+                    languageDelays: false,
+                    anxietyDepression: false,
+                    complexTrauma: false,
+                    atRiskOf: ""
+                }
+            });
+            
+            // UI state
+            const [loading, setLoading] = useState(false);
+            const [loadingStage, setLoadingStage] = useState('');
+            const [elapsed, setElapsed] = useState(0);
+            const [error, setError] = useState(null);
+            const timerRef = useRef(null);
+
+            // Check Ollama status
+            useEffect(() => {
+                fetch('http://localhost:11434/api/tags')
+                    .then(r => r.json())
+                    .then(d => setStatus(d.status === 'ok' ? 'ready' : 'no-model'))
+                    .catch(() => setStatus('offline'));
+            }, []);
+
+            // Timer
+            useEffect(() => {
+                if (loading) {
+                    setElapsed(0);
+                    timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+                } else {
+                    clearInterval(timerRef.current);
+                }
+                return () => clearInterval(timerRef.current);
+            }, [loading]);
+
+            // Auto-update checklist when files are added
+            useEffect(() => {
+                const newChecklist = { ...checklist };
+                files.forEach(file => {
+                    if (file.type && !newChecklist[file.type]) {
+                        newChecklist[file.type] = 'have';
+                    }
+                });
+                setChecklist(newChecklist);
+            }, [files]);
+
+            const combinedText = files.map(f => `--- ${f.name} ---\n${f.text}`).join('\n\n');
+            const totalWords = combinedText.trim() ? combinedText.trim().split(/\s+/).length : 0;
+            
+            // Count criteria with supporting evidence (for display purposes only - clinician makes final determination)
+            const aWithEvidence = ['A1','A2','A3'].filter(c => evidence[c]?.quotes?.length > 0).length;
+            const bWithEvidence = ['B1','B2','B3','B4'].filter(c => evidence[c]?.quotes?.length > 0).length;
+            const cHasEvidence = evidence.C?.quotes?.length > 0;
+            const dHasEvidence = evidence.D?.quotes?.length > 0;
+            const eHasEvidence = evidence.E?.quotes?.length > 0;
+
+            // Count checklist status
+            const criticalMissing = Object.entries(DOCUMENT_CATEGORIES).flatMap(([_, docs]) => 
+                docs.filter(d => d.critical && checklist[d.id] !== 'have' && checklist[d.id] !== 'na')
+            );
+
+            async function handleFiles(fileList) {
+                setError(null);
+                const newFiles = [];
+                for (const file of fileList) {
+                    try {
+                        let text = '';
+                        if (file.name.endsWith('.docx')) text = await parseDocx(file);
+                        else if (file.name.endsWith('.txt')) text = await parseTxt(file);
+                        else if (file.name.endsWith('.pdf')) text = await parsePdf(file);
+                        else continue;
+                        
+                        // First try filename detection
+                        let docType = detectDocumentTypeFromFilename(file.name);
+                        
+                        newFiles.push({ 
+                            name: file.name, 
+                            text, 
+                            wordCount: text.trim().split(/\s+/).length,
+                            type: docType,
+                            classifying: !docType // Flag if we need content classification
+                        });
+                    } catch (e) { setError(`Error reading ${file.name}`); }
+                }
+                setFiles(prev => [...prev, ...newFiles]);
+            }
+
+            // Run content classification for files that weren't detected by filename
+            async function classifyUnknownFiles() {
+                if (status !== 'ready') return;
+                
+                const needsClassification = files.filter(f => f.classifying || !f.type);
+                if (needsClassification.length === 0) return;
+
+                setLoadingStage('classifying');
+                setLoading(true);
+                
+                const updatedFiles = [...files];
+                for (const file of needsClassification) {
+                    const idx = updatedFiles.findIndex(f => f.name === file.name);
+                    if (idx === -1) continue;
+                    
+                    try {
+                        const detectedType = await classifyDocumentContent(file.text, MODELS[selectedModel]);
+                        updatedFiles[idx] = { ...updatedFiles[idx], type: detectedType, classifying: false };
+                    } catch (e) {
+                        console.error('Classification failed for', file.name, e);
+                        updatedFiles[idx] = { ...updatedFiles[idx], classifying: false };
+                    }
+                }
+                
+                setFiles(updatedFiles);
+                setLoading(false);
+            }
+
+            async function runExtraction() {
+                if (!combinedText.trim()) return;
+                setLoading(true);
+                setLoadingStage('extracting');
+                setError(null);
+                try {
+                    const result = await extractEvidence(combinedText, MODELS[selectedModel], useCloudExtract);
+                    // Normalize the result - handle both array format and object format
+                    const normalized = {};
+                    const allCriteria = ['A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'B4', 'C', 'D', 'E'];
+                    allCriteria.forEach(key => {
+                        const val = result[key];
+                        if (Array.isArray(val)) {
+                            // New simple format: just an array of quotes
+                            normalized[key] = { quotes: val };
+                        } else if (val && typeof val === 'object') {
+                            // Old format with supporting/contradicting
+                            normalized[key] = {
+                                quotes: [...(val.supporting || []), ...(val.contradicting || [])]
+                            };
+                        } else {
+                            normalized[key] = { quotes: [] };
+                        }
+                    });
+                    setEvidence(normalized);
+                    setScreen(5);
+                } catch (e) {
+                    console.error('Extraction error:', e);
+                    setError('Failed: ' + e.message);
+                }
+                setLoading(false);
+            }
+
+            async function runCaseNoteGeneration() {
+                setLoading(true);
+                setLoadingStage('generating');
+                setError(null);
+                try {
+                    const note = await generateCaseNote(evidence, clientInfo, functionalAssessment, diagnosticDecisions, MODELS[selectedModel]);
+                    setCaseNote(note);
+                    setScreen(8);
+                } catch (e) {
+                    setError('Failed: ' + e.message);
+                }
+                setLoading(false);
+            }
+
+            const screens = [
+                { n: 1, label: 'Demographics', icon: '👤' },
+                { n: 2, label: 'Pre-Assessment', icon: '📋' },
+                { n: 3, label: 'Handover', icon: '📤' },
+                { n: 4, label: 'Documents', icon: '📄' },
+                { n: 5, label: 'Evidence', icon: '🔍' },
+                { n: 6, label: 'Functional', icon: '🧩' },
+                { n: 7, label: 'Diagnosis', icon: '⚖️' },
+                { n: 8, label: 'Case Note', icon: '📝' },
+                { n: 9, label: 'Export', icon: '📥' },
+                { n: 10, label: 'Reports', icon: '📨' }
+            ];
+
+            return (
+                <div className="min-h-screen">
+                    <ProgressModal isOpen={loading} stage={loadingStage} elapsed={elapsed} model={MODELS[selectedModel]} />
+                    
+                    {/* Header */}
+                    <header className="glass-header text-white p-4 shadow-lg">
+                        <div className="max-w-7xl mx-auto flex justify-between items-center">
+                            <div>
+                                <h1 className="text-xl font-bold">ASD Assessment Workflow</h1>
+                                <p className="text-gold-200 text-sm">Aurum (AU) v0.11 • Llama 3.3 70B</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="bg-gold-600 text-white px-3 py-2 rounded-lg text-sm font-medium">⚡ Llama 3.3 70B</span>
+                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${status === 'ready' ? 'bg-sage-400 text-white' : 'bg-coral-400 text-white'}`}>
+                                    {status === 'ready' ? '● Ready' : '○ Offline'}
+                                </span>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Navigation */}
+                    <div className="glass-nav border-b shadow-sm">
+                        <div className="max-w-7xl mx-auto flex">
+                            {screens.map(({ n, label, icon }) => (
+                                <button key={n} onClick={() => !loading && setScreen(n)}
+                                    className={`flex-1 py-3 px-2 text-xs sm:text-sm font-medium border-b-3 transition-all ${
+                                        screen === n 
+                                            ? 'border-b-2 border-gold-500 text-gold-600 bg-gold-50' 
+                                            : 'border-transparent text-harbour-500 hover:text-harbour-700 hover:bg-harbour-50'
+                                    }`}>
+                                    <span className="mr-1">{icon}</span>
+                                    <span className="hidden sm:inline">{label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Main Content */}
+                    <main className="max-w-7xl mx-auto p-4 sm:p-6">
+                        {error && (
+                            <div className="mb-4 p-4 bg-coral-50 border border-coral-200 rounded-xl text-coral-600 flex justify-between items-start">
+                                <div><strong>⚠️ Error:</strong> {error}</div>
+                                <button onClick={() => setError(null)} className="text-coral-500 text-xl">×</button>
+                            </div>
+                        )}
+
+                        {screen === 1 && (
+                            <Screen1_Demographics 
+                                clientInfo={clientInfo} 
+                                setClientInfo={setClientInfo}
+                                files={files}
+                                setFiles={setFiles}
+                                handleFiles={handleFiles}
+                                classifyFiles={classifyUnknownFiles}
+                                status={status}
+                                loading={loading}
+                                onNext={() => setScreen(2)}
+                            />
+                        )}
+                        
+                        {screen === 2 && (
+                            <Screen2_PreAssessment 
+                                checklist={checklist}
+                                setChecklist={setChecklist}
+                                checklistNotes={checklistNotes}
+                                setChecklistNotes={setChecklistNotes}
+                                files={files}
+                                criticalMissing={criticalMissing}
+                                prescanData={prescanData}
+                                setPrescanData={setPrescanData}
+                                prescanLoading={prescanLoading}
+                                setPrescanLoading={setPrescanLoading}
+                                onBack={() => setScreen(1)}
+                                onNext={() => setScreen(3)}
+                            />
+                        )}
+                        
+                        {screen === 3 && (
+                            <Screen3_Handover 
+                                clientInfo={clientInfo}
+                                checklist={checklist}
+                                checklistNotes={checklistNotes}
+                                files={files}
+                                criticalMissing={criticalMissing}
+                                prescanData={prescanData}
+                                onBack={() => setScreen(2)}
+                                onNext={() => setScreen(4)}
+                            />
+                        )}
+                        
+                        {screen === 4 && (
+                            <Screen4_Documents 
+                                useCloudExtract={useCloudExtract}
+                                setUseCloudExtract={setUseCloudExtract}
+                                
+                                files={files}
+                                totalWords={totalWords}
+                                onBack={() => setScreen(3)}
+                                onExtract={runExtraction}
+                                loading={loading}
+                                status={status}
+                                selectedModel={selectedModel}
+                            />
+                        )}
+                        
+                        {screen === 5 && (
+                            <Screen5_Evidence 
+                                evidence={evidence}
+                                files={files}
+                                aWithEvidence={aWithEvidence}
+                                bWithEvidence={bWithEvidence}
+                                cHasEvidence={cHasEvidence}
+                                dHasEvidence={dHasEvidence}
+                                eHasEvidence={eHasEvidence}
+                                onBack={() => setScreen(4)}
+                                onNext={() => setScreen(6)}
+                                onDeleteQuote={deleteQuote}
+                                onEditQuote={editQuote}
+                                onAddQuote={addQuote}
+                                loading={loading}
+                            />
+                        )}
+                        
+                        {screen === 6 && (
+                            <Screen6_Functional
+                                functionalAssessment={functionalAssessment}
+                                setFunctionalAssessment={setFunctionalAssessment}
+                                files={files}
+                                evidence={evidence}
+                                loading={loading}
+                                setLoading={setLoading}
+                                onBack={() => setScreen(7)}
+                                onNext={() => setScreen(7)}
+                            />
+                        )}
+
+                        {screen === 7 && (
+                            <Screen7_Diagnosis
+                                diagnosticDecisions={diagnosticDecisions}
+                                setDiagnosticDecisions={setDiagnosticDecisions}
+                                evidence={evidence}
+                                onBack={() => setScreen(6)}
+                                onNext={runCaseNoteGeneration}
+                            />
+                        )}
+
+                        {screen === 8 && (
+                            <Screen8_CaseNote 
+                                caseNote={caseNote}
+                                clientInfo={clientInfo}
+                                evidence={evidence}
+                                onBack={() => setScreen(7)}
+                                onNext={() => setScreen(9)}
+                            />
+                        )}
+
+                        {screen === 9 && (
+                            <Screen9_Export
+                                caseNote={caseNote}
+                                clientInfo={clientInfo}
+                                evidence={evidence}
+                                functionalAssessment={functionalAssessment}
+                                diagnosticDecisions={diagnosticDecisions}
+                                onBack={() => setScreen(8)}
+                            />
+                        )}
+
+                        {screen === 10 && (
+                            <Screen10_Reports
+                                clientInfo={clientInfo}
+                                evidence={evidence}
+                                functionalAssessment={functionalAssessment}
+                                diagnosticDecisions={diagnosticDecisions}
+                                caseNote={caseNote}
+                                files={files}
+                                onBack={() => setScreen(9)}
+                            />
+                        )}
+                    </main>
+
+                    {/* Footer */}
+                    <footer className="text-center py-4 text-white/70 text-sm">
+                        Aurum (AU) v0.11 • Local Processing • Llama 3.3 70B
+                    </footer>
+                </div>
+            );
+        }
+
+        // ============== SCREEN 1: Demographics + Upload ==============
+        function Screen1_Demographics({ clientInfo, setClientInfo, files, setFiles, handleFiles, classifyFiles, status, loading, onNext }) {
+            const fileInputRef = useRef(null);
+            const [dragover, setDragover] = useState(false);
+            
+            const unclassifiedCount = files.filter(f => !f.type).length;
+            const classifyingCount = files.filter(f => f.classifying).length;
+
+            return (
+                <div className="space-y-6">
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-harbour-700">
+                            <span className="bg-gold-100 text-teal-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">1</span>
+                            Client Demographics
+                        </h2>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-harbour-600 mb-1">Child Name / ID *</label>
+                                <input type="text" value={clientInfo.name} 
+                                    onChange={(e) => setClientInfo(prev => ({ ...prev, name: e.target.value }))} 
+                                    placeholder="e.g., I.A." 
+                                    className="w-full p-3 border border-harbour-200 rounded-xl focus:ring-2 focus:ring-gold-400 focus:border-gold-400" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-harbour-600 mb-1">Date of Birth</label>
+                                <input type="date" value={clientInfo.dob} 
+                                    onChange={(e) => setClientInfo(prev => ({ ...prev, dob: e.target.value }))} 
+                                    className="w-full p-3 border border-harbour-200 rounded-xl focus:ring-2 focus:ring-gold-400 focus:border-gold-400" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-harbour-600 mb-1">Age</label>
+                                <input type="text" value={clientInfo.age} 
+                                    onChange={(e) => setClientInfo(prev => ({ ...prev, age: e.target.value }))} 
+                                    placeholder="e.g., 5 years 3 months" 
+                                    className="w-full p-3 border border-harbour-200 rounded-xl focus:ring-2 focus:ring-gold-400 focus:border-gold-400" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-harbour-600 mb-1">Assessment Date</label>
+                                <input type="date" value={clientInfo.assessmentDate} 
+                                    onChange={(e) => setClientInfo(prev => ({ ...prev, assessmentDate: e.target.value }))} 
+                                    className="w-full p-3 border border-harbour-200 rounded-xl focus:ring-2 focus:ring-gold-400 focus:border-gold-400" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-harbour-600 mb-1">Reviewer / Clinician</label>
+                                <input type="text" value={clientInfo.reviewer} 
+                                    onChange={(e) => setClientInfo(prev => ({ ...prev, reviewer: e.target.value }))} 
+                                    placeholder="Your name" 
+                                    className="w-full p-3 border border-harbour-200 rounded-xl focus:ring-2 focus:ring-gold-400 focus:border-gold-400" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h2 className="text-xl font-bold mb-4 text-harbour-700">📄 Upload Clinical Documents</h2>
+                        <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${dragover ? 'border-gold-500 bg-gold-50' : 'border-harbour-300'}`}
+                            onDrop={(e) => { e.preventDefault(); setDragover(false); handleFiles(Array.from(e.dataTransfer.files)); }}
+                            onDragOver={(e) => { e.preventDefault(); setDragover(true); }}
+                            onDragLeave={(e) => { e.preventDefault(); setDragover(false); }}>
+                            <input type="file" ref={fileInputRef} onChange={(e) => handleFiles(Array.from(e.target.files))} accept=".txt,.docx,.pdf" multiple className="hidden" />
+                            <span className="text-5xl">📁</span>
+                            <p className="mt-3 text-harbour-600 font-medium">Drag and drop clinical documents here</p>
+                            <button onClick={() => fileInputRef.current?.click()} className="mt-3 px-6 py-2 bg-gold-500 text-white rounded-xl hover:bg-gold-600 font-medium transition-colors">
+                                Browse Files
+                            </button>
+                            <p className="mt-2 text-xs text-harbour-400">Supports .pdf, .docx and .txt • Multiple files allowed</p>
+                        </div>
+
+                        {files.length > 0 && (
+                            <div className="mt-6">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="font-medium text-harbour-700 flex items-center gap-2">
+                                        <span className="bg-sage-100 text-sage-700 px-2 py-1 rounded-full text-sm">{files.length}</span>
+                                        Document{files.length > 1 ? 's' : ''} Loaded
+                                    </h3>
+                                    {unclassifiedCount > 0 && status === 'ready' && (
+                                        <button 
+                                            onClick={classifyFiles}
+                                            disabled={loading}
+                                            className="px-4 py-2 bg-gold-500 text-white rounded-xl hover:bg-gold-600 font-medium text-sm transition-colors disabled:opacity-50">
+                                            🔍 Classify {unclassifiedCount} Unidentified
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="grid gap-2">
+                                    {files.map((file, i) => (
+                                        <div key={i} className={`flex items-center justify-between rounded-xl px-4 py-3 ${
+                                            file.type ? 'bg-sage-50 border border-sage-200' : 'bg-gold-50 border border-gold-200'
+                                        }`}>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-xl">{file.classifying ? '⏳' : file.type ? '✅' : '❓'}</span>
+                                                <div>
+                                                    <p className="font-medium text-harbour-700">{file.name}</p>
+                                                    <p className="text-xs text-harbour-500">
+                                                        {file.wordCount.toLocaleString()} words
+                                                        {file.classifying && ' • Classifying...'}
+                                                        {file.type && ` • ${file.type.replace(/_/g, ' ')}`}
+                                                        {!file.type && !file.classifying && ' • Unknown type'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-coral-500 hover:text-coral-700 text-xl">×</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex justify-end">
+                        <button onClick={onNext} disabled={!clientInfo.name} 
+                            className={`px-6 py-3 rounded-xl font-semibold transition-colors ${clientInfo.name ? 'bg-gold-500 text-white hover:bg-gold-600' : 'bg-harbour-200 text-harbour-400 cursor-not-allowed'}`}>
+                            Next: Pre-Assessment Review →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============== SCREEN 2: Pre-Assessment Checklist ==============
+        function Screen2_PreAssessment({ checklist, setChecklist, checklistNotes, setChecklistNotes, files, criticalMissing, prescanData, setPrescanData, prescanLoading, setPrescanLoading, onBack, onNext }) {
+            
+            // Auto-trigger prescan when entering this screen with files
+            useEffect(() => {
+                if (files.length > 0 && !prescanData && !prescanLoading) {
+                    runPrescanAnalysis();
+                }
+            }, []);
+            
+            async function runPrescanAnalysis() {
+                setPrescanLoading(true);
+                console.log('=== PRESCAN DEBUG ===');
+                files.forEach(f => console.log(f.name, f.text?.length || 0, 'chars'));
+                try {
+                    const metadata = await runPrescan(files);
+                    console.log('Prescan result:', metadata);
+                    setPrescanData(metadata);
+                } catch (e) {
+                    console.error('Prescan failed:', e);
+                }
+                setPrescanLoading(false);
+            }
+            
+            // Categorize uploaded files by filename
+            const categorizeFile = (filename) => {
+                const lower = filename.toLowerCase();
+                if (lower.includes('gp') || lower.includes('referral') || lower.includes('paed')) return 'referral';
+                if (lower.includes('hearing') || lower.includes('audio') || lower.includes('bera')) return 'medical';
+                if (lower.includes('vision') || lower.includes('eye')) return 'medical';
+                if (lower.includes('teacher') || lower.includes('school') || lower.includes('educator') || lower.includes('kindergarten')) return 'school';
+                if (lower.includes('speech') || lower.includes('slp') || lower.includes('pathology')) return 'allied';
+                if (lower.includes('ot') || lower.includes('occupational')) return 'allied';
+                if (lower.includes('psych')) return 'allied';
+                if (lower.includes('social') || lower.includes('worker')) return 'allied';
+                if (lower.includes('development') || lower.includes('history') || lower.includes('milestone')) return 'development';
+                if (lower.includes('sensory') || lower.includes('srs') || lower.includes('scq') || lower.includes('vineland') || lower.includes('abas')) return 'questionnaire';
+                if (lower.includes('iep') || lower.includes('support') || lower.includes('naplan')) return 'school';
+                return 'other';
+            };
+            
+            const documentCategories = {
+                referral: { name: 'Referral & Medical', icon: '📋', files: [] },
+                medical: { name: 'Medical/Hearing/Vision', icon: '🏥', files: [] },
+                development: { name: 'Developmental History', icon: '👶', files: [] },
+                school: { name: 'School / Education', icon: '🏫', files: [] },
+                allied: { name: 'Allied Health Reports', icon: '📊', files: [] },
+                questionnaire: { name: 'Questionnaires', icon: '📝', files: [] },
+                other: { name: 'Other Documents', icon: '📄', files: [] }
+            };
+            
+            files.forEach(f => {
+                const cat = categorizeFile(f.name);
+                documentCategories[cat].files.push(f);
+            });
+            
+            // Determine readiness based on red flags
+            const redFlagCount = prescanData?.red_flags?.length || 0;
+            const getReadinessStatus = () => {
+                if (!prescanData) return null;
+                if (redFlagCount === 0) return 'ready';
+                if (redFlagCount <= 2) return 'gaps';
+                return 'delay';
+            };
+            const readiness = getReadinessStatus();
+
+            const [previewFile, setPreviewFile] = useState(null);
+            
+            return (
+                <div className="space-y-6">
+                    {/* Document Preview Modal */}
+                    {previewFile && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                                <div className="bg-harbour-600 text-white p-4 rounded-t-2xl flex justify-between items-center">
+                                    <div>
+                                        <h3 className="font-bold">📄 {previewFile.name}</h3>
+                                        <p className="text-harbour-200 text-sm">{previewFile.wordCount.toLocaleString()} words</p>
+                                    </div>
+                                    <button onClick={() => setPreviewFile(null)} className="text-white hover:text-harbour-200 text-2xl px-2">×</button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-6">
+                                    <pre className="whitespace-pre-wrap font-sans text-sm text-harbour-600 leading-relaxed">{previewFile.text}</pre>
+                                </div>
+                                <div className="p-4 border-t border-harbour-200 flex justify-end">
+                                    <button onClick={() => setPreviewFile(null)} className="px-4 py-2 bg-harbour-100 hover:bg-harbour-200 rounded-lg text-harbour-600 transition-colors">
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* AI Prescan Full-Screen Loading */}
+                    {prescanLoading && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+                            <div className="glass-card rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 text-center">
+                                <div className="text-6xl mb-4">🔍</div>
+                                <h3 className="text-xl font-bold text-harbour-700 mb-2">Analyzing Documents</h3>
+                                <p className="text-harbour-500 mb-4">Checking for critical assessment requirements...</p>
+                                <div className="flex justify-center mb-4">
+                                    <svg className="animate-spin h-8 w-8 text-teal-500" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                    </svg>
+                                </div>
+                                <p className="text-sm text-harbour-400">~10-15 seconds</p>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h2 className="text-xl font-bold mb-2 flex items-center gap-2 text-harbour-700">
+                            <span className="bg-gold-100 text-teal-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">2</span>
+                            Pre-Assessment Document Review
+                        </h2>
+                        <p className="text-harbour-500 text-sm mb-6">AI checks critical requirements. Review document inventory below.</p>
+
+                        {/* Section 1: Critical Gaps (AI-powered) */}
+                        {prescanData && !prescanLoading && (
+                            <div className={`rounded-xl p-5 mb-6 border-2 ${
+                                readiness === 'ready' ? 'bg-sage-50 border-sage-300' :
+                                readiness === 'gaps' ? 'bg-gold-50 border-gold-300' :
+                                'bg-coral-50 border-coral-300'
+                            }`}>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="font-bold text-lg flex items-center gap-2">
+                                        {readiness === 'ready' && <span className="text-sage-600">✓ Ready to Proceed</span>}
+                                        {readiness === 'gaps' && <span className="text-gold-700">⚡ Proceed with Gaps</span>}
+                                        {readiness === 'delay' && <span className="text-coral-700">⚠️ Critical Gaps - Consider Delay</span>}
+                                    </h3>
+                                    <button onClick={runPrescanAnalysis} className="text-sm text-harbour-500 hover:text-harbour-700 flex items-center gap-1">
+                                        ↻ Re-scan
+                                    </button>
+                                </div>
+                                
+                                {/* 5 Critical Items Status */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+                                    {[
+                                        { key: 'gp_referral', label: 'GP/Paed Referral', icon: '📋' },
+                                        { key: 'hearing_test', label: 'Hearing Test', icon: '👂' },
+                                        { key: 'dev_history', label: 'Developmental History', icon: '👶' },
+                                        { key: 'teacher_input', label: 'Teacher/School Input', icon: '🏫' },
+                                        { key: 'previous_asd', label: 'Previous ASD Assessment', icon: '📑' },
+                                    ].map(item => {
+                                        const data = prescanData[item.key] || {};
+                                        const status = data.status || 'unknown';
+                                        const isOk = ['present', 'normal', 'none', 'none_mentioned'].includes(status);
+                                        const isMissing = status === 'missing' || status === 'not_done';
+                                        
+                                        // Find source file by keywords (ignore AI source - it's unreliable)
+                                        const fileKeywords = {
+                                            'gp_referral': ['gp', 'referral', 'paed'],
+                                            'hearing_test': ['gp', 'referral'],  // Hearing test is usually in GP referral
+                                            'dev_history': ['gp', 'referral', 'social', 'psych', 'history'],
+                                            'teacher_input': ['teacher', 'school', 'educator', 'kindergarten'],
+                                            'previous_asd': ['gp', 'referral', 'psych']
+                                        };
+                                        const keywords = fileKeywords[item.key] || [];
+                                        const sourceFile = isOk ? files.find(f => {
+                                            const fLower = f.name.toLowerCase();
+                                            return keywords.some(kw => fLower.includes(kw));
+                                        }) : null;
+                                        const hasSource = !!sourceFile;
+                                        
+                                        return (
+                                            <div key={item.key} 
+                                                onClick={() => hasSource && setPreviewFile(sourceFile)}
+                                                className={`flex items-center gap-2 p-3 rounded-lg transition-all ${
+                                                    isOk ? 'bg-white/70' : isMissing ? 'bg-coral-100' : 'bg-white/50'
+                                                } ${hasSource ? 'cursor-pointer hover:ring-2 hover:ring-gold-400' : ''}`}>
+                                                <span className="text-xl">{item.icon}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium text-sm text-harbour-700">{item.label}</p>
+                                                    <p className={`text-xs ${isOk ? 'text-sage-600' : isMissing ? 'text-coral-600' : 'text-harbour-400'}`}>
+                                                        {status === 'present' && '✓ Present'}
+                                                        {status === 'normal' && '✓ Normal'}
+                                                        {status === 'none_mentioned' && '— Not applicable'}
+                                                        {status === 'missing' && '✗ Missing - action needed'}
+                                                        {status === 'not_done' && '✗ Not done - refer'}
+                                                        {status === 'concerns' && '⚠ Concerns noted'}
+                                                        {!['present', 'normal', 'none_mentioned', 'missing', 'not_done', 'concerns'].includes(status) && status}
+                                                    </p>
+                                                    {hasSource && <p className="text-xs text-gold-600 truncate mt-1">📄 {sourceFile.name}</p>}
+                                                </div>
+                                                {hasSource && <span className="text-harbour-300">→</span>}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                
+                                {/* Red Flags List */}
+                                {prescanData.red_flags?.length > 0 && (
+                                    <div className="bg-white/50 rounded-lg p-4">
+                                        <p className="font-medium text-coral-700 mb-2">⚠️ Action Required:</p>
+                                        <ul className="space-y-1">
+                                            {prescanData.red_flags.map((flag, i) => (
+                                                <li key={i} className="text-sm text-coral-600 flex items-start gap-2">
+                                                    <span>•</span>
+                                                    <span>{flag}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                                
+                                {redFlagCount === 0 && (
+                                    <p className="text-sage-600 text-sm">All critical requirements met. Assessment can proceed.</p>
+                                )}
+                            </div>
+                        )}
+                        
+                        {/* No files message */}
+                        {files.length === 0 && (
+                            <div className="text-center py-8 text-harbour-400">
+                                <span className="text-4xl">📁</span>
+                                <p className="mt-2">No documents uploaded yet</p>
+                                <p className="text-sm">Go back to upload clinical documents</p>
+                            </div>
+                        )}
+
+                        {/* Section 2: Document Inventory */}
+                        {files.length > 0 && (
+                            <div>
+                                <h3 className="font-bold text-harbour-700 mb-4 flex items-center gap-2">
+                                    📂 Document Inventory
+                                    <span className="bg-gold-100 text-teal-700 px-2 py-1 rounded-full text-sm font-normal">{files.length} files</span>
+                                </h3>
+                                
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    {Object.entries(documentCategories).map(([key, cat]) => (
+                                        cat.files.length > 0 && (
+                                            <div key={key} className="bg-harbour-50 rounded-xl p-4">
+                                                <h4 className="font-medium text-harbour-700 mb-2 flex items-center gap-2">
+                                                    <span>{cat.icon}</span>
+                                                    {cat.name}
+                                                    <span className="text-xs text-harbour-400">({cat.files.length})</span>
+                                                </h4>
+                                                <ul className="space-y-1">
+                                                    {cat.files.map((f, i) => (
+                                                        <li key={i} 
+                                                            onClick={() => setPreviewFile(f)}
+                                                            className="text-sm text-harbour-600 flex items-center gap-2 cursor-pointer hover:bg-white/50 rounded px-2 py-1 -mx-2 transition-colors">
+                                                            <span className="text-sage-500">✓</span>
+                                                            <span className="truncate">{f.name}</span>
+                                                            <span className="text-xs text-harbour-400 ml-auto">{Math.round(f.wordCount/100)/10}k</span>
+                                                            <span className="text-harbour-300">→</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )
+                                    ))}
+                                </div>
+                                
+                                {/* Missing categories hint */}
+                                <div className="mt-4 p-3 bg-gold-50 rounded-lg">
+                                    <p className="text-sm text-gold-700">
+                                        <strong>💡 Tip:</strong> Missing documents? You can still proceed if you plan to cover gaps in interview.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">← Back</button>
+                        <button onClick={onNext} className="px-6 py-3 rounded-xl bg-gold-500 text-white hover:bg-gold-600 font-semibold transition-colors">
+                            Next: Handover Summary →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+                // ============== SCREEN 3: Handover Summary ==============
+        function Screen3_Handover({ clientInfo, checklist, checklistNotes, files, criticalMissing, prescanData, onBack, onNext }) {
+            const [readiness, setReadiness] = useState('proceed_gaps');
+            const [plan, setPlan] = useState('');
+            const [interviewTopics, setInterviewTopics] = useState('');
+            const [keyFindings, setKeyFindings] = useState({});
+            const [previewFile, setPreviewFile] = useState(null);
+            
+            // Categorize files
+            const categorizeFile = (filename) => {
+                const lower = filename.toLowerCase();
+                if (lower.includes('gp') || lower.includes('referral') || lower.includes('paed')) return 'referral';
+                if (lower.includes('teacher') || lower.includes('school') || lower.includes('educator') || lower.includes('kindergarten')) return 'school';
+                if (lower.includes('speech') || lower.includes('slp')) return 'speech';
+                if (lower.includes('ot') || lower.includes('occupational')) return 'ot';
+                if (lower.includes('psych')) return 'psych';
+                if (lower.includes('social') || lower.includes('worker')) return 'social';
+                if (lower.includes('sensory') || lower.includes('srs') || lower.includes('vineland')) return 'questionnaire';
+                return 'other';
+            };
+            
+            const categoryLabels = {
+                referral: '📋 Referral & Medical',
+                school: '🏫 School / Education', 
+                speech: '🗣️ Speech Pathology',
+                ot: '🤲 Occupational Therapy',
+                psych: '🧠 Psychology',
+                social: '👥 Social Work',
+                questionnaire: '📝 Questionnaires',
+                other: '📄 Other'
+            };
+
+            // Get red flags from prescan
+            const redFlags = prescanData?.red_flags || [];
+
+            return (
+                <div className="space-y-6">
+                    {/* Document Preview Modal */}
+                    {previewFile && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                                <div className="bg-harbour-600 text-white p-4 rounded-t-2xl flex justify-between items-center">
+                                    <div>
+                                        <h3 className="font-bold">📄 {previewFile.name}</h3>
+                                        <p className="text-harbour-200 text-sm">{previewFile.wordCount?.toLocaleString()} words</p>
+                                    </div>
+                                    <button onClick={() => setPreviewFile(null)} className="text-white hover:text-harbour-200 text-2xl px-2">×</button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-6">
+                                    <pre className="whitespace-pre-wrap font-sans text-sm text-harbour-600 leading-relaxed">{previewFile.text}</pre>
+                                </div>
+                                <div className="p-4 border-t border-harbour-200 flex justify-end">
+                                    <button onClick={() => setPreviewFile(null)} className="px-4 py-2 bg-harbour-100 hover:bg-harbour-200 rounded-lg text-harbour-600">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-harbour-700">
+                            <span className="bg-gold-100 text-teal-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">3</span>
+                            Handover to Assessment Team
+                        </h2>
+
+                        {/* Client Summary */}
+                        <div className="bg-harbour-50 rounded-xl p-4 mb-6">
+                            <h3 className="font-bold text-harbour-700 mb-2">👤 Client Summary</h3>
+                            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                                <div className="bg-white rounded-lg p-2">
+                                    <p className="text-harbour-400 text-xs">Name</p>
+                                    <p className="font-medium text-harbour-700">{clientInfo.name || '—'}</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-2">
+                                    <p className="text-harbour-400 text-xs">DOB</p>
+                                    <p className="font-medium text-harbour-700">{clientInfo.dob || '—'}</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-2">
+                                    <p className="text-harbour-400 text-xs">Age</p>
+                                    <p className="font-medium text-harbour-700">{clientInfo.age || '—'}</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-2">
+                                    <p className="text-harbour-400 text-xs">Assessment Date</p>
+                                    <p className="font-medium text-harbour-700">{clientInfo.assessmentDate || '—'}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Red Flags from AI */}
+                        {redFlags.length > 0 && (
+                            <div className="bg-coral-50 border-2 border-coral-300 rounded-xl p-4 mb-6">
+                                <h3 className="font-bold text-coral-700 mb-2">🚨 Action Required Before Assessment</h3>
+                                <ul className="space-y-2">
+                                    {redFlags.map((flag, i) => (
+                                        <li key={i} className="text-coral-600 flex items-start gap-2 text-sm">
+                                            <span>⚠️</span>
+                                            <span>{flag}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
+                        {/* Document Inventory with Key Findings */}
+                        <div className="mb-6">
+                            <h3 className="font-bold text-harbour-700 mb-3">📂 Document Inventory & Key Findings</h3>
+                            <p className="text-harbour-500 text-sm mb-4">Click a document to preview. Add key findings for the assessment team.</p>
+                            
+                            <div className="space-y-3">
+                                {files.map((file, i) => {
+                                    const category = categorizeFile(file.name);
+                                    return (
+                                        <div key={i} className="bg-harbour-50 rounded-xl p-4">
+                                            <div className="flex items-start gap-3">
+                                                <button 
+                                                    onClick={() => setPreviewFile(file)}
+                                                    className="flex-1 text-left hover:bg-white/50 rounded-lg p-2 -m-2 transition-colors">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-sage-500">✓</span>
+                                                        <span className="font-medium text-harbour-700">{file.name}</span>
+                                                        <span className="text-xs text-harbour-400 ml-auto">{Math.round(file.wordCount/100)/10}k words →</span>
+                                                    </div>
+                                                    <p className="text-xs text-harbour-400 mt-1 ml-5">{categoryLabels[category]}</p>
+                                                </button>
+                                            </div>
+                                            <div className="mt-3">
+                                                <textarea 
+                                                    value={keyFindings[file.name] || ''}
+                                                    onChange={(e) => setKeyFindings(prev => ({...prev, [file.name]: e.target.value}))}
+                                                    placeholder="Key findings: e.g., Social communication delays, sensory sensitivities noted..."
+                                                    className="w-full p-2 text-sm border border-harbour-200 rounded-lg h-16 focus:ring-2 focus:ring-gold-400 resize-none"
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            
+                            {files.length === 0 && (
+                                <p className="text-harbour-400 italic text-center py-4">No documents uploaded</p>
+                            )}
+                        </div>
+
+                        {/* Assessment Readiness */}
+                        <div className="mb-6">
+                            <h3 className="font-bold text-harbour-700 mb-3">✅ Assessment Readiness</h3>
+                            <div className="flex flex-wrap gap-3">
+                                {[
+                                    { id: 'ready', label: '✓ Ready to proceed', bg: 'bg-sage-500', desc: 'All critical info available' },
+                                    { id: 'proceed_gaps', label: '⚡ Proceed with gaps', bg: 'bg-gold-500', desc: 'Plan to cover in interview' },
+                                    { id: 'delay', label: '✗ Delay assessment', bg: 'bg-coral-500', desc: 'Critical info missing' }
+                                ].map(opt => (
+                                    <button key={opt.id}
+                                        onClick={() => setReadiness(opt.id)}
+                                        className={`px-4 py-3 rounded-xl font-medium transition-colors text-left ${
+                                            readiness === opt.id 
+                                                ? `\${opt.bg} text-white` 
+                                                : 'bg-harbour-100 hover:bg-harbour-200 text-harbour-600'
+                                        }`}>
+                                        <span className="block">{opt.label}</span>
+                                        <span className={`text-xs \${readiness === opt.id ? 'text-white/80' : 'text-harbour-400'}`}>{opt.desc}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Plan for gaps */}
+                        {readiness === 'proceed_gaps' && (
+                            <div className="mb-6 bg-gold-50 rounded-xl p-4">
+                                <label className="block font-bold text-gold-700 mb-2">📝 Plan to Address Gaps:</label>
+                                <textarea value={plan} onChange={(e) => setPlan(e.target.value)}
+                                    placeholder="e.g., Will cover developmental history in parent interview. Teacher phone call scheduled for..."
+                                    className="w-full p-3 border border-gold-200 rounded-xl h-24 focus:ring-2 focus:ring-gold-400" />
+                            </div>
+                        )}
+
+                        {/* Interview topics */}
+                        <div className="bg-gold-50 rounded-xl p-4">
+                            <label className="block font-bold text-teal-700 mb-2">🎯 Priority Topics for Interview:</label>
+                            <textarea value={interviewTopics} onChange={(e) => setInterviewTopics(e.target.value)}
+                                placeholder="e.g., Early milestones (parent couldn't recall), sensory triggers at school, peer relationships..."
+                                className="w-full p-3 border border-gold-200 rounded-xl h-24 focus:ring-2 focus:ring-gold-400" />
+                        </div>
+                    </div>
+
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">← Back</button>
+                        <button onClick={onNext} className="px-6 py-3 rounded-xl bg-gold-500 text-white hover:bg-gold-600 font-semibold transition-colors">
+                            Next: Review Documents →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+                // ============== SCREEN 4: Document Browser ==============
+        function Screen4_Documents({ files, totalWords, onBack, onExtract, loading, status, selectedModel, useCloudExtract, setUseCloudExtract }) {
+            const [selectedFile, setSelectedFile] = useState(0);
+            const [searchTerm, setSearchTerm] = useState('');
+
+            const highlightText = (text, term) => {
+                if (!term) return text;
+                const parts = text.split(new RegExp(`(${term})`, 'gi'));
+                return parts.map((part, i) => 
+                    part.toLowerCase() === term.toLowerCase() 
+                        ? <mark key={i} className="highlight">{part}</mark> 
+                        : part
+                );
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+                            <h2 className="text-xl font-bold flex items-center gap-2 text-harbour-700">
+                                <span className="bg-gold-100 text-teal-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">4</span>
+                                Document Browser
+                            </h2>
+                            <div className="flex items-center gap-4">
+                                <input type="text" placeholder="Search in documents..." value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="px-3 py-2 border border-harbour-200 rounded-xl text-sm w-48 focus:ring-2 focus:ring-gold-400" />
+                                <span className="bg-gold-100 text-teal-700 px-3 py-1 rounded-full text-sm font-medium">{totalWords.toLocaleString()} words</span>
+                            </div>
+                        </div>
+
+                        {files.length === 0 ? (
+                            <div className="text-center py-12 text-harbour-400">
+                                <span className="text-4xl">📄</span>
+                                <p className="mt-2">No documents uploaded yet</p>
+                                <p className="text-sm">Go back to Screen 1 to upload documents</p>
+                            </div>
+                        ) : (
+                            <div className="flex gap-4">
+                                {/* File list */}
+                                <div className="w-56 space-y-2 border-r border-harbour-200 pr-4">
+                                    {files.map((file, i) => (
+                                        <button key={i} onClick={() => setSelectedFile(i)}
+                                            className={`w-full text-left px-3 py-2 rounded-xl text-sm transition-all ${
+                                                selectedFile === i ? 'bg-gold-100 text-teal-700 font-medium' : 'hover:bg-harbour-100 text-harbour-600'
+                                            }`}>
+                                            📄 {file.name.length > 22 ? file.name.slice(0, 22) + '...' : file.name}
+                                            <span className="block text-xs text-harbour-400">{file.wordCount} words</span>
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Document content */}
+                                <div className="flex-1 bg-harbour-50 rounded-xl p-4 max-h-[500px] overflow-y-auto">
+                                    <h3 className="font-medium text-harbour-700 mb-2 sticky top-0 bg-harbour-50 pb-2 border-b border-harbour-200">
+                                        {files[selectedFile]?.name}
+                                    </h3>
+                                    <pre className="text-sm text-harbour-600 whitespace-pre-wrap font-sans leading-relaxed">
+                                        {searchTerm ? highlightText(files[selectedFile]?.text, searchTerm) : files[selectedFile]?.text}
+                                    </pre>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="bg-gold-50 border border-gold-200 rounded-xl p-4 flex justify-between items-center">
+                        <p className="text-teal-700 text-sm">
+                            <strong>Model:</strong> {useCloudExtract ? "Llama 3.3 70B (HuggingFace)" : "Llama 3.3 70B (local)"} • 
+                            <strong> Est. time:</strong> {useCloudExtract ? "~10 sec (cloud)" : "~2 min (local)"}
+                        </p>
+                        <button onClick={() => setUseCloudExtract(!useCloudExtract)} className={useCloudExtract ? "px-4 py-2 rounded-lg text-sm font-medium bg-purple-500 text-white" : "px-4 py-2 rounded-lg text-sm font-medium bg-harbour-200 text-harbour-600 hover:bg-harbour-300"}>{useCloudExtract ? "☁️ Cloud" : "💻 Local"}</button>
+                    </div>
+
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">← Back</button>
+                        <button onClick={onExtract} disabled={loading || status !== 'ready' || files.length === 0}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-colors ${
+                                files.length > 0 && status === 'ready' 
+                                    ? 'bg-gold-500 text-white hover:bg-gold-600' 
+                                    : 'bg-harbour-200 text-harbour-400 cursor-not-allowed'
+                            }`}>
+                            ⚡ Extract DSM-5 Evidence →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============== SCREEN 5: DSM-5 Evidence ==============
+        function Screen5_Evidence({ evidence, files, aWithEvidence, bWithEvidence, cHasEvidence, dHasEvidence, eHasEvidence, onBack, onNext, onDeleteQuote, onEditQuote, onAddQuote, loading }) {
+            const [selectedQuote, setSelectedQuote] = useState(null);
+            const [selectedFile, setSelectedFile] = useState(null);
+            const [viewerOpen, setViewerOpen] = useState(false);
+            const contentRef = useRef(null);
+
+            // Find quote in documents and return file object
+            const findQuoteSource = (quote) => {
+                for (const file of files) {
+                    if (file.text.toLowerCase().includes(quote.toLowerCase().slice(0, 50))) {
+                        return file.name;
+                    }
+                }
+                return null;
+            };
+
+            const findQuoteFile = (quote) => {
+                for (const file of files) {
+                    if (file.text.toLowerCase().includes(quote.toLowerCase().slice(0, 50))) {
+                        return file;
+                    }
+                }
+                return null;
+            };
+
+            const openQuoteViewer = (quote) => {
+                const file = findQuoteFile(quote);
+                if (file) {
+                    setSelectedQuote(quote);
+                    setSelectedFile(file);
+                    setViewerOpen(true);
+                }
+            };
+
+            const closeViewer = () => {
+                setViewerOpen(false);
+                setSelectedQuote(null);
+                setSelectedFile(null);
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* Quote Viewer Slide-out Panel */}
+                    {viewerOpen && selectedFile && (
+                        <div className="fixed inset-0 z-50 flex">
+                            <div className="absolute inset-0 bg-black/50" onClick={closeViewer}></div>
+                            <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl flex flex-col">
+                                <div className="bg-harbour-600 text-white p-4 flex justify-between items-center">
+                                    <div>
+                                        <h3 className="font-bold">📄 {selectedFile.name}</h3>
+                                        <p className="text-harbour-200 text-sm">Quote highlighted below</p>
+                                    </div>
+                                    <button onClick={closeViewer} className="text-white hover:text-harbour-200 text-2xl">×</button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-6" ref={contentRef}>
+                                    <QuoteHighlightedText text={selectedFile.text} quote={selectedQuote} />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Summary Banner */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <div className="flex flex-wrap justify-between items-center gap-4">
+                            <div>
+                                <h2 className="text-xl font-bold flex items-center gap-2 text-harbour-700">
+                                    <span className="bg-gold-100 text-teal-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">5</span>
+                                    DSM-5 Evidence Map
+                                </h2>
+                                <p className="text-sm text-harbour-500 mt-1">Evidence extracted from documents — clinician determines if criteria are met</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2 text-sm">
+                                <span className={`px-3 py-1 rounded-full ${aWithEvidence > 0 ? 'bg-gold-100 text-gold-700' : 'bg-harbour-100 text-harbour-400'}`}>
+                                    A: {aWithEvidence}/3 with evidence
+                                </span>
+                                <span className={`px-3 py-1 rounded-full ${bWithEvidence > 0 ? 'bg-gold-100 text-teal-700' : 'bg-harbour-100 text-harbour-400'}`}>
+                                    B: {bWithEvidence}/4 with evidence
+                                </span>
+                                <span className={`px-3 py-1 rounded-full ${cHasEvidence ? 'bg-coral-100 text-coral-700' : 'bg-harbour-100 text-harbour-400'}`}>
+                                    C: {cHasEvidence ? '✓' : '—'}
+                                </span>
+                                <span className={`px-3 py-1 rounded-full ${dHasEvidence ? 'bg-coral-100 text-coral-700' : 'bg-harbour-100 text-harbour-400'}`}>
+                                    D: {dHasEvidence ? '✓' : '—'}
+                                </span>
+                                <span className={`px-3 py-1 rounded-full ${eHasEvidence ? 'bg-coral-100 text-coral-700' : 'bg-harbour-100 text-harbour-400'}`}>
+                                    E: {eHasEvidence ? '✓' : '—'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Evidence Grid - A and B */}
+                    <div className="grid lg:grid-cols-2 gap-6">
+                        {/* Criterion A */}
+                        <div className="glass-card rounded-2xl shadow-lg p-6">
+                            <h3 className="font-bold text-gold-600 mb-4 text-lg flex items-center gap-2">
+                                <span className="w-8 h-8 bg-gold-100 rounded-full flex items-center justify-center text-gold-700">A</span>
+                                Social Communication & Interaction
+                            </h3>
+                            <p className="text-sm text-harbour-400 mb-4">All 3 required for diagnosis</p>
+                            {['A1', 'A2', 'A3'].map(code => (
+                                <EvidenceCard key={code} code={code} data={evidence[code]} info={criteriaInfo[code]} findQuoteSource={findQuoteSource} onQuoteClick={openQuoteViewer} onDelete={onDeleteQuote} onEdit={onEditQuote} onAdd={onAddQuote} />
+                            ))}
+                        </div>
+
+                        {/* Criterion B */}
+                        <div className="glass-card rounded-2xl shadow-lg p-6">
+                            <h3 className="font-bold text-gold-600 mb-4 text-lg flex items-center gap-2">
+                                <span className="w-8 h-8 bg-gold-100 rounded-full flex items-center justify-center text-teal-700">B</span>
+                                Restricted, Repetitive Behaviours
+                            </h3>
+                            <p className="text-sm text-harbour-400 mb-4">At least 2 of 4 required for diagnosis</p>
+                            {['B1', 'B2', 'B3', 'B4'].map(code => (
+                                <EvidenceCard key={code} code={code} data={evidence[code]} info={criteriaInfo[code]} findQuoteSource={findQuoteSource} onQuoteClick={openQuoteViewer} onDelete={onDeleteQuote} onEdit={onEditQuote} onAdd={onAddQuote} />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Criteria C, D, E */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-coral-600 mb-4 text-lg flex items-center gap-2">
+                            <span className="w-8 h-8 bg-coral-100 rounded-full flex items-center justify-center text-coral-700">C/D/E</span>
+                            Additional Required Criteria
+                        </h3>
+                        <div className="grid md:grid-cols-3 gap-4">
+                            {['C', 'D', 'E'].map(code => (
+                                <EvidenceCard key={code} code={code} data={evidence[code]} info={criteriaInfo[code]} findQuoteSource={findQuoteSource} onQuoteClick={openQuoteViewer} onDelete={onDeleteQuote} onEdit={onEditQuote} onAdd={onAddQuote} />
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">← Back</button>
+                        <button onClick={onNext}
+                            className="px-6 py-3 rounded-xl bg-sage-500 text-white hover:bg-sage-600 font-semibold transition-colors">
+                            🧩 Functional Assessment →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        function EvidenceCard({ code, data, info, findQuoteSource, onQuoteClick, onDelete, onEdit, onAdd }) {
+            const [expanded, setExpanded] = useState(true);
+            const [editingIndex, setEditingIndex] = useState(null);
+            const [editText, setEditText] = useState('');
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [newQuoteText, setNewQuoteText] = useState('');
+            const quotes = data?.quotes || [];
+            const hasEvidence = quotes.length > 0;
+            
+            const colorClass = info.color === 'gold' ? 'gold' : info.color === 'teal' ? 'teal' : 'coral';
+
+            const startEdit = (index, currentText) => {
+                setEditingIndex(index);
+                setEditText(currentText);
+            };
+
+            const saveEdit = () => {
+                if (editText.trim()) {
+                    onEdit(code, editingIndex, editText.trim());
+                }
+                setEditingIndex(null);
+                setEditText('');
+            };
+
+            const handleAdd = () => {
+                if (newQuoteText.trim()) {
+                    onAdd(code, newQuoteText.trim());
+                    setNewQuoteText('');
+                    setShowAddForm(false);
+                }
+            };
+
+            return (
+                <div className={`rounded-xl border-l-4 mb-3 ${hasEvidence ? `border-${colorClass}-400 bg-${colorClass}-50` : 'border-harbour-300 bg-harbour-50'}`}>
+                    <button onClick={() => setExpanded(!expanded)} className="w-full p-3 flex justify-between items-start text-left">
+                        <div className="flex items-start gap-2">
+                            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                                hasEvidence ? `bg-${colorClass}-200 text-${colorClass}-800` : 'bg-harbour-200 text-harbour-400'
+                            }`}>{quotes.length > 0 ? quotes.length : '—'}</span>
+                            <div>
+                                <span className="font-medium text-harbour-700">{code}: {info.name}</span>
+                                <p className="text-xs text-harbour-400 mt-1">{info.desc}</p>
+                            </div>
+                        </div>
+                        <span className="text-harbour-400">{expanded ? '▼' : '▶'}</span>
+                    </button>
+                    
+                    {expanded && (
+                        <div className="px-3 pb-3 pt-1 border-t border-harbour-200">
+                            {quotes.length > 0 && (
+                                <p className="text-xs font-medium text-harbour-600 mb-1">Relevant Evidence ({quotes.length}):</p>
+                            )}
+                            {quotes.map((quote, i) => {
+                                const source = quote.source || findQuoteSource(quote.text || quote);
+                                const quoteText = (quote.text || quote).replace(/^"+|"+$/g, '');
+                                
+                                if (editingIndex === i) {
+                                    return (
+                                        <div key={i} className={`pl-3 border-l-2 border-${colorClass}-300 mb-2 bg-white p-2 rounded-lg`}>
+                                            <textarea
+                                                value={editText}
+                                                onChange={(e) => setEditText(e.target.value)}
+                                                className="w-full p-2 border rounded text-sm"
+                                                rows={3}
+                                                autoFocus
+                                            />
+                                            <div className="flex gap-2 mt-2">
+                                                <button onClick={saveEdit} className="px-3 py-1 bg-gold-500 text-white rounded text-xs">Save</button>
+                                                <button onClick={() => setEditingIndex(null)} className="px-3 py-1 bg-harbour-300 text-harbour-700 rounded text-xs">Cancel</button>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                
+                                return (
+                                    <div key={i} className={`text-sm text-harbour-600 pl-3 border-l-2 border-${colorClass}-300 mb-2 bg-white p-2 rounded-lg group relative`}>
+                                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                                            <button onClick={(e) => { e.stopPropagation(); startEdit(i, quoteText); }} className="p-1 hover:bg-harbour-100 rounded" title="Edit">✏️</button>
+                                            <button onClick={(e) => { e.stopPropagation(); onDelete(code, i); }} className="p-1 hover:bg-red-100 rounded" title="Delete">🗑️</button>
+                                        </div>
+                                        <p className="italic cursor-pointer" onClick={() => source && onQuoteClick(quote.text || quote)}>"{quoteText}"</p>
+                                        {source && <p className="text-xs text-gold-600 mt-1">📄 {source} <span className="text-harbour-400">— click to view</span></p>}
+                                    </div>
+                                );
+                            })}
+                            
+                            {quotes.length === 0 && !showAddForm && (
+                                <p className="text-sm text-harbour-400 italic">No evidence extracted for this criterion</p>
+                            )}
+                            
+                            {showAddForm ? (
+                                <div className="mt-2 p-2 bg-white rounded-lg border border-dashed border-harbour-300">
+                                    <textarea
+                                        value={newQuoteText}
+                                        onChange={(e) => setNewQuoteText(e.target.value)}
+                                        placeholder="Enter quote or evidence..."
+                                        className="w-full p-2 border rounded text-sm"
+                                        rows={2}
+                                        autoFocus
+                                    />
+                                    <div className="flex gap-2 mt-2">
+                                        <button onClick={handleAdd} className="px-3 py-1 bg-gold-500 text-white rounded text-xs">Add</button>
+                                        <button onClick={() => { setShowAddForm(false); setNewQuoteText(''); }} className="px-3 py-1 bg-harbour-300 text-harbour-700 rounded text-xs">Cancel</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button onClick={() => setShowAddForm(true)} className="mt-2 text-xs text-gold-600 hover:text-teal-800 flex items-center gap-1">
+                                    <span>➕</span> Add evidence manually
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+        // Component to show document text with quote highlighted
+        function QuoteHighlightedText({ text, quote }) {
+            const highlightRef = useRef(null);
+            
+            useEffect(() => {
+                // Scroll to highlighted text after render
+                if (highlightRef.current) {
+                    highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, [quote]);
+
+            if (!quote || !text) return <pre className="whitespace-pre-wrap font-sans text-sm text-harbour-600 leading-relaxed">{text}</pre>;
+            
+            // Find the quote in text (case-insensitive, partial match)
+            const searchStr = quote.slice(0, 60).toLowerCase();
+            const lowerText = text.toLowerCase();
+            const index = lowerText.indexOf(searchStr);
+            
+            if (index === -1) {
+                return <pre className="whitespace-pre-wrap font-sans text-sm text-harbour-600 leading-relaxed">{text}</pre>;
+            }
+            
+            const before = text.slice(0, index);
+            const match = text.slice(index, index + quote.length);
+            const after = text.slice(index + quote.length);
+            
+            return (
+                <pre className="whitespace-pre-wrap font-sans text-sm text-harbour-600 leading-relaxed">
+                    {before}
+                    <mark ref={highlightRef} className="bg-gold-300 text-harbour-800 px-1 py-0.5 rounded font-medium">{match}</mark>
+                    {after}
+                </pre>
+            );
+        }
+        // ============== SCREEN 6: Functional Assessment ==============
+        function Screen6_Functional({ functionalAssessment, setFunctionalAssessment, files, evidence, loading, setLoading, onBack, onNext }) {
+            const [extracting, setExtracting] = useState(false);
+            
+            const domains = [
+                { key: 'strengths', label: 'Strengths / Interests', icon: '⭐', desc: 'Skills, values, interests that are personally meaningful' },
+                { key: 'medical', label: 'Medical / Physical', icon: '🏥', desc: 'Health conditions, physical development, sensory/motor' },
+                { key: 'cognitive', label: 'Cognitive, Thinking & Learning', icon: '🧠', desc: 'Problem-solving, reasoning, academic learning' },
+                { key: 'speech', label: 'Speech, Language & Communication', icon: '💬', desc: 'Receptive/expressive language, pragmatics' },
+                { key: 'motor', label: 'Motor Skills', icon: '🏃', desc: 'Gross/fine motor, coordination, handwriting' },
+                { key: 'social', label: 'Social Communication & Relationships', icon: '👥', desc: 'Peer relationships, social understanding' },
+                { key: 'emotional', label: 'Affect / Emotional Regulation', icon: '💚', desc: 'Emotional awareness, self-regulation, behaviour' },
+                { key: 'attention', label: 'Attention & Executive Functioning', icon: '🎯', desc: 'Focus, planning, organisation, flexibility' },
+                { key: 'adaptive', label: 'Adaptive Behaviour & Daily Skills', icon: '🏠', desc: 'Self-care, independence, daily living' },
+                { key: 'background', label: 'Background & History', icon: '📋', desc: 'Developmental history, services, psychosocial factors' }
+            ];
+
+            const updateDomain = (key, text) => {
+                setFunctionalAssessment(prev => ({
+                    ...prev,
+                    [key]: { ...prev[key], text, reviewed: true }
+                }));
+            };
+
+            const markReviewed = (key) => {
+                setFunctionalAssessment(prev => ({
+                    ...prev,
+                    [key]: { ...prev[key], reviewed: true }
+                }));
+            };
+
+            const runExtraction = async () => {
+                setExtracting(true);
+                try {
+                    const combinedText = files.map(f => `--- ${f.name} ---\n${f.text}`).join('\n\n');
+                    const response = await fetch('/api/extract-functional', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: combinedText, model: 'llama-3.3-70b' })
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        const extracted = JSON.parse(data.response);
+                        setFunctionalAssessment(prev => {
+                            const updated = { ...prev };
+                            for (const key of Object.keys(extracted)) {
+                                if (updated[key]) {
+                                    updated[key] = { text: extracted[key] || "", reviewed: false, aiGenerated: true };
+                                }
+                            }
+                            return updated;
+                        });
+                    }
+                } catch (e) {
+                    console.error('Extraction error:', e);
+                }
+                setExtracting(false);
+            };
+
+            const allReviewed = domains.every(d => functionalAssessment[d.key]?.reviewed);
+            const reviewedCount = domains.filter(d => functionalAssessment[d.key]?.reviewed).length;
+
+            return (
+                <div className="space-y-6">
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <h2 className="text-xl font-bold flex items-center gap-2 text-harbour-700">
+                                    <span className="text-2xl">🧩</span> Functional Assessment
+                                </h2>
+                                <p className="text-harbour-500 text-sm mt-1">ICF-based domains • AI extracts from documents, clinician reviews</p>
+                            </div>
+                            <button 
+                                onClick={runExtraction}
+                                disabled={extracting || files.length === 0}
+                                className="px-4 py-2 rounded-lg bg-gold-500 text-white hover:bg-gold-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                            >
+                                {extracting ? '🔄 Extracting...' : '🤖 Extract from Documents'}
+                            </button>
+                        </div>
+
+                        {/* Automation bias warning */}
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                            <p className="text-amber-800 text-sm">
+                                <strong>⚠️ Review Required:</strong> AI-extracted content requires clinician verification. 
+                                Sections marked with 🤖 are AI-generated and unreviewed.
+                            </p>
+                        </div>
+
+                        {/* Progress indicator */}
+                        <div className="mb-4">
+                            <div className="flex justify-between text-sm text-harbour-600 mb-1">
+                                <span>Review Progress</span>
+                                <span>{reviewedCount} / {domains.length} reviewed</span>
+                            </div>
+                            <div className="h-2 bg-harbour-200 rounded-full overflow-hidden">
+                                <div 
+                                    className="h-full bg-gold-500 transition-all duration-300"
+                                    style={{ width: `${(reviewedCount / domains.length) * 100}%` }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Domain cards */}
+                    <div className="grid gap-4">
+                        {domains.map(domain => {
+                            const data = functionalAssessment[domain.key] || { text: "", reviewed: false, aiGenerated: false };
+                            const needsReview = data.aiGenerated && !data.reviewed;
+                            
+                            return (
+                                <div key={domain.key} className={`glass-card rounded-xl p-4 ${needsReview ? 'ring-2 ring-amber-400' : ''}`}>
+                                    <div className="flex items-start gap-3 mb-2">
+                                        <span className="text-2xl">{domain.icon}</span>
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-semibold text-harbour-700">{domain.label}</h3>
+                                                {data.aiGenerated && !data.reviewed && (
+                                                    <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full">🤖 Needs Review</span>
+                                                )}
+                                                {data.reviewed && (
+                                                    <span className="px-2 py-0.5 bg-gold-100 text-teal-700 text-xs rounded-full">✓ Reviewed</span>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-harbour-400">{domain.desc}</p>
+                                        </div>
+                                    </div>
+                                    <textarea
+                                        value={data.text}
+                                        onChange={(e) => updateDomain(domain.key, e.target.value)}
+                                        placeholder={`Enter ${domain.label.toLowerCase()} information...`}
+                                        className="w-full p-3 border border-harbour-200 rounded-lg text-sm min-h-[80px] focus:ring-2 focus:ring-gold-300 focus:border-gold-400"
+                                        rows={3}
+                                    />
+                                    {data.aiGenerated && !data.reviewed && (
+                                        <button 
+                                            onClick={() => markReviewed(domain.key)}
+                                            className="mt-2 text-sm text-gold-600 hover:text-teal-800"
+                                        >
+                                            ✓ Mark as reviewed
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Navigation */}
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">
+                            ← Back to Evidence
+                        </button>
+                        <button 
+                            onClick={onNext}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-colors ${
+                                allReviewed 
+                                    ? 'bg-gold-500 text-white hover:bg-gold-600' 
+                                    : 'bg-amber-500 text-white hover:bg-amber-600'
+                            }`}
+                        >
+                            {allReviewed ? '⚖️ Diagnostic Decisions →' : `⚖️ Continue (${domains.length - reviewedCount} unreviewed) →`}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+
+        // ============== SCREEN 7: Diagnostic Decisions ==============
+        function Screen7_Diagnosis({ diagnosticDecisions, setDiagnosticDecisions, evidence, onBack, onNext }) {
+            
+            const criteriaInfo = {
+                A1: { name: 'Social-emotional reciprocity', category: 'A', desc: 'Back-and-forth conversation, sharing interests/emotions, social approach' },
+                A2: { name: 'Nonverbal communication', category: 'A', desc: 'Eye contact, gestures, facial expressions, body language' },
+                A3: { name: 'Relationships', category: 'A', desc: 'Adjusting behaviour to context, sharing play, making friends' },
+                B1: { name: 'Stereotyped/repetitive behaviours', category: 'B', desc: 'Motor movements, use of objects, speech patterns' },
+                B2: { name: 'Insistence on sameness', category: 'B', desc: 'Routines, rituals, resistance to change, rigid thinking' },
+                B3: { name: 'Restricted interests', category: 'B', desc: 'Fixated interests abnormal in intensity or focus' },
+                B4: { name: 'Sensory differences', category: 'B', desc: 'Hyper/hypo-reactivity, unusual sensory interests' },
+                C: { name: 'Early developmental period', category: 'C', desc: 'Symptoms present early (may not fully manifest until demands exceed capacity)' },
+                D: { name: 'Clinically significant impairment', category: 'D', desc: 'Symptoms cause significant impairment in current functioning' },
+                E: { name: 'Not better explained', category: 'E', desc: 'Not better explained by intellectual disability or global developmental delay' }
+            };
+
+            const updateDecision = (criterion, field, value) => {
+                setDiagnosticDecisions(prev => ({
+                    ...prev,
+                    [criterion]: { ...prev[criterion], [field]: value }
+                }));
+            };
+
+            const updateLevel = (field, value) => {
+                setDiagnosticDecisions(prev => ({ ...prev, [field]: value }));
+            };
+
+            // Count evidence quotes per criterion
+            const getEvidenceCount = (criterion) => evidence[criterion]?.quotes?.length || 0;
+
+            // Check if required criteria are met
+            const aMet = ['A1', 'A2', 'A3'].filter(c => diagnosticDecisions[c]?.met === 'met').length;
+            const bMet = ['B1', 'B2', 'B3', 'B4'].filter(c => diagnosticDecisions[c]?.met === 'met').length;
+            const cMet = diagnosticDecisions.C?.met === 'met';
+            const dMet = diagnosticDecisions.D?.met === 'met';
+            const eMet = diagnosticDecisions.E?.met === 'met';
+
+            const meetsASD = aMet === 3 && bMet >= 2 && cMet && dMet && eMet;
+            const allDecisionsMade = ['A1','A2','A3','B1','B2','B3','B4','C','D','E'].every(c => diagnosticDecisions[c]?.met);
+
+            const CriterionCard = ({ code }) => {
+                const info = criteriaInfo[code];
+                const decision = diagnosticDecisions[code] || { met: null, aiSuggested: null, notes: "" };
+                const evidenceCount = getEvidenceCount(code);
+                
+                return (
+                    <div className="bg-white rounded-lg p-4 border border-harbour-200">
+                        <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-harbour-700">{code}</span>
+                                    <span className="text-harbour-600">{info.name}</span>
+                                    {evidenceCount > 0 && (
+                                        <span className="px-2 py-0.5 bg-gold-100 text-teal-700 text-xs rounded-full">
+                                            {evidenceCount} quote{evidenceCount !== 1 ? 's' : ''}
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="text-xs text-harbour-400 mt-1">{info.desc}</p>
+                            </div>
+                        </div>
+                        
+                        {/* Decision buttons - empty by default to prevent automation bias */}
+                        <div className="flex gap-2 mt-3">
+                            <button
+                                onClick={() => updateDecision(code, 'met', 'met')}
+                                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                                    decision.met === 'met' 
+                                        ? 'bg-gold-500 text-white' 
+                                        : 'bg-harbour-100 text-harbour-600 hover:bg-harbour-200'
+                                }`}
+                            >
+                                ✓ Met
+                            </button>
+                            <button
+                                onClick={() => updateDecision(code, 'met', 'not_met')}
+                                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                                    decision.met === 'not_met' 
+                                        ? 'bg-coral-500 text-white' 
+                                        : 'bg-harbour-100 text-harbour-600 hover:bg-harbour-200'
+                                }`}
+                            >
+                                ✗ Not Met
+                            </button>
+                            <button
+                                onClick={() => updateDecision(code, 'met', 'insufficient')}
+                                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                                    decision.met === 'insufficient' 
+                                        ? 'bg-amber-500 text-white' 
+                                        : 'bg-harbour-100 text-harbour-600 hover:bg-harbour-200'
+                                }`}
+                            >
+                                ? Insufficient
+                            </button>
+                        </div>
+
+                        {/* Optional notes */}
+                        <input
+                            type="text"
+                            placeholder="Clinical notes (optional)..."
+                            value={decision.notes || ''}
+                            onChange={(e) => updateDecision(code, 'notes', e.target.value)}
+                            className="w-full mt-2 p-2 text-sm border border-harbour-200 rounded-lg"
+                        />
+                    </div>
+                );
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h2 className="text-xl font-bold flex items-center gap-2 text-harbour-700 mb-2">
+                            <span className="text-2xl">⚖️</span> Diagnostic Decisions
+                        </h2>
+                        <p className="text-harbour-500 text-sm">Clinician determines if each DSM-5 criterion is met based on evidence</p>
+                        
+                        {/* Automation bias reminder */}
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-4">
+                            <p className="text-blue-800 text-sm">
+                                <strong>📋 Clinician Decision Required:</strong> All decisions below must be made by the clinician. 
+                                Evidence counts shown for reference only.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Criterion A */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-teal-700 mb-3 flex items-center gap-2">
+                            <span className="w-8 h-8 bg-gold-100 rounded-full flex items-center justify-center text-teal-700">A</span>
+                            Social Communication & Interaction
+                            <span className="text-sm font-normal text-harbour-500 ml-2">({aMet}/3 required: all 3)</span>
+                        </h3>
+                        <div className="space-y-3">
+                            {['A1', 'A2', 'A3'].map(code => <CriterionCard key={code} code={code} />)}
+                        </div>
+                    </div>
+
+                    {/* Criterion B */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-gold-700 mb-3 flex items-center gap-2">
+                            <span className="w-8 h-8 bg-gold-100 rounded-full flex items-center justify-center text-gold-700">B</span>
+                            Restricted, Repetitive Behaviours
+                            <span className="text-sm font-normal text-harbour-500 ml-2">({bMet}/4 required: at least 2)</span>
+                        </h3>
+                        <div className="space-y-3">
+                            {['B1', 'B2', 'B3', 'B4'].map(code => <CriterionCard key={code} code={code} />)}
+                        </div>
+                    </div>
+
+                    {/* Criteria C, D, E */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-coral-700 mb-3 flex items-center gap-2">
+                            <span className="w-8 h-8 bg-coral-100 rounded-full flex items-center justify-center text-coral-700">C-E</span>
+                            Additional Requirements
+                        </h3>
+                        <div className="space-y-3">
+                            {['C', 'D', 'E'].map(code => <CriterionCard key={code} code={code} />)}
+                        </div>
+                    </div>
+
+                    {/* Severity Levels */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-harbour-700 mb-3 flex items-center gap-2">
+                            <span className="text-2xl">📊</span> Severity Levels (if ASD criteria met)
+                        </h3>
+                        <div className="grid md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-harbour-600 mb-2">
+                                    Social Communication Level
+                                </label>
+                                <select
+                                    value={diagnosticDecisions.socialLevel || ''}
+                                    onChange={(e) => updateLevel('socialLevel', e.target.value)}
+                                    className="w-full p-3 border border-harbour-200 rounded-lg"
+                                >
+                                    <option value="">— Select level —</option>
+                                    <option value="1">Level 1 - Requiring support</option>
+                                    <option value="2">Level 2 - Requiring substantial support</option>
+                                    <option value="3">Level 3 - Requiring very substantial support</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-harbour-600 mb-2">
+                                    Restricted/Repetitive Behaviours Level
+                                </label>
+                                <select
+                                    value={diagnosticDecisions.behaviourLevel || ''}
+                                    onChange={(e) => updateLevel('behaviourLevel', e.target.value)}
+                                    className="w-full p-3 border border-harbour-200 rounded-lg"
+                                >
+                                    <option value="">— Select level —</option>
+                                    <option value="1">Level 1 - Requiring support</option>
+                                    <option value="2">Level 2 - Requiring substantial support</option>
+                                    <option value="3">Level 3 - Requiring very substantial support</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Co-occurring and Differential Diagnoses */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-purple-700 mb-3 flex items-center gap-2">
+                            <span className="text-2xl">🔀</span> Co-occurring / Differential Diagnoses
+                        </h3>
+                        <p className="text-sm text-harbour-500 mb-4">Select any additional diagnoses or presentations identified during assessment</p>
+                        
+                        {/* Primary Diagnoses */}
+                        <div className="space-y-3 mb-4">
+                            <h4 className="font-medium text-harbour-700 text-sm">Primary Diagnoses (DSM-5-TR)</h4>
+                            
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.globalDelay || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, globalDelay: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span className="flex-1">Global Developmental Delay (315.8)</span>
+                            </label>
+
+                            <div className="p-3 bg-harbour-50 rounded-lg">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" 
+                                        checked={diagnosticDecisions.coOccurring?.intellectualDisability || false}
+                                        onChange={(e) => setDiagnosticDecisions(prev => ({
+                                            ...prev, 
+                                            coOccurring: {...prev.coOccurring, intellectualDisability: e.target.checked}
+                                        }))}
+                                        className="w-5 h-5 rounded"
+                                    />
+                                    <span>Intellectual Disability (319)</span>
+                                </label>
+                                {diagnosticDecisions.coOccurring?.intellectualDisability && (
+                                    <select 
+                                        value={diagnosticDecisions.coOccurring?.intellectualDisabilityLevel || ''}
+                                        onChange={(e) => setDiagnosticDecisions(prev => ({
+                                            ...prev,
+                                            coOccurring: {...prev.coOccurring, intellectualDisabilityLevel: e.target.value}
+                                        }))}
+                                        className="mt-2 ml-8 p-2 border rounded text-sm"
+                                    >
+                                        <option value="">— Select severity —</option>
+                                        <option value="mild">Mild</option>
+                                        <option value="moderate">Moderate</option>
+                                        <option value="severe">Severe</option>
+                                        <option value="profound">Profound</option>
+                                    </select>
+                                )}
+                            </div>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.languageDisorder || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, languageDisorder: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>(Developmental) Language Disorder (315.39)</span>
+                            </label>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.pragmaticDisorder || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, pragmaticDisorder: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Social (Pragmatic) Communication Disorder (315.39)</span>
+                            </label>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.coordinationDisorder || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, coordinationDisorder: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Developmental Coordination Disorder (315.4)</span>
+                            </label>
+
+                            <div className="p-3 bg-harbour-50 rounded-lg">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" 
+                                        checked={diagnosticDecisions.coOccurring?.adhd || false}
+                                        onChange={(e) => setDiagnosticDecisions(prev => ({
+                                            ...prev, 
+                                            coOccurring: {...prev.coOccurring, adhd: e.target.checked}
+                                        }))}
+                                        className="w-5 h-5 rounded"
+                                    />
+                                    <span>Attention Deficit Hyperactivity Disorder (ADHD)</span>
+                                </label>
+                                {diagnosticDecisions.coOccurring?.adhd && (
+                                    <select 
+                                        value={diagnosticDecisions.coOccurring?.adhdType || ''}
+                                        onChange={(e) => setDiagnosticDecisions(prev => ({
+                                            ...prev,
+                                            coOccurring: {...prev.coOccurring, adhdType: e.target.value}
+                                        }))}
+                                        className="mt-2 ml-8 p-2 border rounded text-sm"
+                                    >
+                                        <option value="">— Select type —</option>
+                                        <option value="inattentive">Predominantly Inattentive (314.00)</option>
+                                        <option value="hyperactive">Predominantly Hyperactive/Impulsive (314.01)</option>
+                                        <option value="combined">Combined (314.01)</option>
+                                    </select>
+                                )}
+                            </div>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.learningDisorder || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, learningDisorder: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Specific Learning Disorder (Reading 315.0 / Written 315.2 / Maths 315.1)</span>
+                            </label>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.fasd || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, fasd: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>FASD - Neurodevelopmental Disorder Associated with Prenatal Alcohol Exposure (315.8)</span>
+                            </label>
+                        </div>
+
+                        {/* Additional Presentations */}
+                        <div className="space-y-3 pt-4 border-t border-harbour-200">
+                            <h4 className="font-medium text-harbour-700 text-sm">Additional Presentations</h4>
+                            
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.sensoryProcessing || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, sensoryProcessing: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Sensory processing difficulties</span>
+                            </label>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.motorDelays || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, motorDelays: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Fine and gross motor delays, low muscle tone</span>
+                            </label>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.languageDelays || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, languageDelays: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Significantly delayed receptive/expressive language skills</span>
+                            </label>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.anxietyDepression || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, anxietyDepression: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Features of Anxiety / Depression</span>
+                            </label>
+
+                            <label className="flex items-center gap-3 p-3 bg-harbour-50 rounded-lg cursor-pointer hover:bg-harbour-100">
+                                <input type="checkbox" 
+                                    checked={diagnosticDecisions.coOccurring?.complexTrauma || false}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev, 
+                                        coOccurring: {...prev.coOccurring, complexTrauma: e.target.checked}
+                                    }))}
+                                    className="w-5 h-5 rounded"
+                                />
+                                <span>Complex trauma / complex social-emotional history</span>
+                            </label>
+
+                            <div className="p-3 bg-harbour-50 rounded-lg">
+                                <label className="block text-sm font-medium text-harbour-600 mb-2">At risk of:</label>
+                                <input 
+                                    type="text"
+                                    value={diagnosticDecisions.coOccurring?.atRiskOf || ''}
+                                    onChange={(e) => setDiagnosticDecisions(prev => ({
+                                        ...prev,
+                                        coOccurring: {...prev.coOccurring, atRiskOf: e.target.value}
+                                    }))}
+                                    placeholder="e.g., social isolation, school refusal, mental health difficulties..."
+                                    className="w-full p-2 border rounded text-sm"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Summary */}
+                    <div className={`glass-card rounded-2xl shadow-lg p-6 ${meetsASD ? 'bg-gold-50 border-2 border-gold-300' : allDecisionsMade ? 'bg-coral-50 border-2 border-coral-300' : ''}`}>
+                        <h3 className="font-bold text-harbour-700 mb-2">Diagnostic Summary</h3>
+                        {!allDecisionsMade ? (
+                            <p className="text-harbour-500">Complete all criterion decisions to see summary.</p>
+                        ) : meetsASD ? (
+                            <div className="text-teal-700">
+                                <p className="font-semibold">✓ DSM-5 criteria for Autism Spectrum Disorder appear to be MET</p>
+                                <p className="text-sm mt-1">A: {aMet}/3 • B: {bMet}/4 (≥2 required) • C, D, E: Met</p>
+                            </div>
+                        ) : (
+                            <div className="text-coral-700">
+                                <p className="font-semibold">✗ DSM-5 criteria for Autism Spectrum Disorder NOT fully met</p>
+                                <p className="text-sm mt-1">A: {aMet}/3 • B: {bMet}/4 • C: {cMet ? '✓' : '✗'} • D: {dMet ? '✓' : '✗'} • E: {eMet ? '✓' : '✗'}</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Navigation */}
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">
+                            ← Back to Functional
+                        </button>
+                        <button 
+                            onClick={onNext}
+                            disabled={!allDecisionsMade}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-colors ${
+                                allDecisionsMade 
+                                    ? 'bg-gold-500 text-white hover:bg-gold-600' 
+                                    : 'bg-harbour-300 text-harbour-500 cursor-not-allowed'
+                            }`}
+                        >
+                            📝 Generate Case Note →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============== SCREEN 8: Case Note ==============
+        function Screen8_CaseNote({ caseNote, clientInfo, evidence, onBack, onNext }) {
+            const copyToClipboard = () => {
+                navigator.clipboard.writeText(caseNote);
+                alert('Case note copied to clipboard!');
+            };
+
+            // Summary of evidence counts for display
+            const aCount = ['A1','A2','A3'].filter(c => evidence[c]?.supporting?.length > 0).length;
+            const bCount = ['B1','B2','B3','B4'].filter(c => evidence[c]?.supporting?.length > 0).length;
+
+            return (
+                <div className="space-y-6">
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+                            <div>
+                                <h2 className="text-xl font-bold flex items-center gap-2 text-harbour-700">
+                                    <span className="bg-gold-100 text-teal-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">6</span>
+                                    Generated Case Note
+                                </h2>
+                                <p className="text-sm text-harbour-400 mt-1">
+                                    Client: {clientInfo.name || 'N/A'} • Age: {clientInfo.age || 'N/A'} • Date: {clientInfo.assessmentDate || 'N/A'}
+                                </p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={copyToClipboard} className="px-4 py-2 bg-gold-100 hover:bg-gold-200 rounded-xl text-sm font-medium text-teal-700 transition-colors">
+                                    📋 Copy to Clipboard
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="p-4 rounded-xl mb-4 bg-harbour-50 border border-harbour-200">
+                            <span className="text-sm text-harbour-600">
+                                Evidence summary: A criteria {aCount}/3 • B criteria {bCount}/4 — 
+                                <strong className="text-harbour-700"> Clinician determines diagnostic outcome</strong>
+                            </span>
+                        </div>
+
+                        <div className="bg-harbour-50 rounded-xl p-6 leading-relaxed text-harbour-700 border border-harbour-200 max-h-[600px] overflow-y-auto markdown-content"
+                            dangerouslySetInnerHTML={{ __html: caseNote ? marked.parse(caseNote) : '<p class="text-harbour-400 italic">No case note generated yet.</p>' }}>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">← Back to Evidence</button>
+                        <button onClick={onNext} className="px-6 py-3 rounded-xl bg-harbour-600 text-white hover:bg-harbour-700 font-semibold transition-colors">
+                            📥 Export Report →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============== SCREEN 9: Export ==============
+        function Screen9_Export({ caseNote, clientInfo, evidence, functionalAssessment, diagnosticDecisions, onBack }) {
+            const [exporting, setExporting] = useState(false);
+            const [exportStatus, setExportStatus] = useState('');
+
+            const downloadMarkdown = () => {
+                const blob = new Blob([caseNote], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${clientInfo.name || 'CaseNote'}_${new Date().toISOString().split('T')[0]}.md`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const exportDocx = async () => {
+                setExporting(true);
+                setExportStatus('Generating Word document...');
+                try {
+                    const response = await fetch('/api/export-docx', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            caseNote,
+                            clientInfo,
+                            evidence,
+                            functionalAssessment,
+                            diagnosticDecisions
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${clientInfo.name || 'CaseNote'}_${new Date().toISOString().split('T')[0]}.docx`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        setExportStatus('✓ Document downloaded!');
+                    } else {
+                        setExportStatus('Export failed - see console');
+                    }
+                } catch (e) {
+                    console.error('Export error:', e);
+                    setExportStatus('Export failed: ' + e.message);
+                }
+                setExporting(false);
+            };
+
+            const copyToClipboard = () => {
+                navigator.clipboard.writeText(caseNote);
+                setExportStatus('✓ Copied to clipboard!');
+                setTimeout(() => setExportStatus(''), 2000);
+            };
+
+            // Summary stats
+            const aMet = ['A1', 'A2', 'A3'].filter(c => diagnosticDecisions[c]?.met === 'met').length;
+            const bMet = ['B1', 'B2', 'B3', 'B4'].filter(c => diagnosticDecisions[c]?.met === 'met').length;
+            const meetsASD = aMet === 3 && bMet >= 2 && 
+                diagnosticDecisions.C?.met === 'met' && 
+                diagnosticDecisions.D?.met === 'met' && 
+                diagnosticDecisions.E?.met === 'met';
+
+            return (
+                <div className="space-y-6">
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h2 className="text-xl font-bold flex items-center gap-2 text-harbour-700 mb-2">
+                            <span className="text-2xl">📥</span> Export Report
+                        </h2>
+                        <p className="text-harbour-500 text-sm">Download the assessment report in your preferred format</p>
+                    </div>
+
+                    {/* Assessment Summary */}
+                    <div className={`glass-card rounded-2xl shadow-lg p-6 ${meetsASD ? 'bg-gold-50 border-2 border-gold-300' : 'bg-harbour-50'}`}>
+                        <h3 className="font-bold text-harbour-700 mb-3">Assessment Summary</h3>
+                        <div className="grid md:grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p><strong>Client:</strong> {clientInfo.name || 'N/A'}</p>
+                                <p><strong>DOB:</strong> {clientInfo.dob || 'N/A'}</p>
+                                <p><strong>Age:</strong> {clientInfo.age || 'N/A'}</p>
+                                <p><strong>Assessment Date:</strong> {clientInfo.assessmentDate || 'N/A'}</p>
+                            </div>
+                            <div>
+                                <p><strong>Criterion A:</strong> {aMet}/3 met</p>
+                                <p><strong>Criterion B:</strong> {bMet}/4 met (≥2 required)</p>
+                                <p><strong>C, D, E:</strong> {diagnosticDecisions.C?.met === 'met' ? '✓' : '✗'} {diagnosticDecisions.D?.met === 'met' ? '✓' : '✗'} {diagnosticDecisions.E?.met === 'met' ? '✓' : '✗'}</p>
+                                {meetsASD && (
+                                    <>
+                                        <p><strong>Social Level:</strong> {diagnosticDecisions.socialLevel || 'Not set'}</p>
+                                        <p><strong>Behaviour Level:</strong> {diagnosticDecisions.behaviourLevel || 'Not set'}</p>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                        <div className={`mt-3 p-2 rounded-lg ${meetsASD ? 'bg-gold-100 text-teal-800' : 'bg-harbour-100 text-harbour-700'}`}>
+                            <strong>{meetsASD ? '✓ DSM-5 ASD criteria met' : '✗ DSM-5 ASD criteria not fully met'}</strong>
+                        </div>
+                    </div>
+
+                    {/* Export Options */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-harbour-700 mb-4">Export Options</h3>
+                        <div className="grid md:grid-cols-3 gap-4">
+                            <button
+                                onClick={copyToClipboard}
+                                className="p-4 rounded-xl border-2 border-harbour-200 hover:border-gold-400 hover:bg-gold-50 transition-colors text-left"
+                            >
+                                <span className="text-2xl">📋</span>
+                                <h4 className="font-semibold text-harbour-700 mt-2">Copy to Clipboard</h4>
+                                <p className="text-xs text-harbour-500 mt-1">Copy plain text for pasting into other applications</p>
+                            </button>
+
+                            <button
+                                onClick={downloadMarkdown}
+                                className="p-4 rounded-xl border-2 border-harbour-200 hover:border-gold-400 hover:bg-gold-50 transition-colors text-left"
+                            >
+                                <span className="text-2xl">📄</span>
+                                <h4 className="font-semibold text-harbour-700 mt-2">Download Markdown</h4>
+                                <p className="text-xs text-harbour-500 mt-1">Save as .md file for further editing</p>
+                            </button>
+
+                            <button
+                                onClick={exportDocx}
+                                disabled={exporting}
+                                className="p-4 rounded-xl border-2 border-harbour-200 hover:border-gold-400 hover:bg-gold-50 transition-colors text-left disabled:opacity-50"
+                            >
+                                <span className="text-2xl">📝</span>
+                                <h4 className="font-semibold text-harbour-700 mt-2">Download Word (.docx)</h4>
+                                <p className="text-xs text-harbour-500 mt-1">Formatted document for clinical records</p>
+                            </button>
+                        </div>
+
+                        {exportStatus && (
+                            <div className="mt-4 p-3 bg-gold-50 text-teal-700 rounded-lg text-sm">
+                                {exportStatus}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Case Note Preview */}
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h3 className="font-bold text-harbour-700 mb-3">Case Note Preview</h3>
+                        <div className="bg-harbour-50 rounded-xl p-6 leading-relaxed text-harbour-700 border border-harbour-200 max-h-[400px] overflow-y-auto markdown-content"
+                            dangerouslySetInnerHTML={{ __html: caseNote ? marked.parse(caseNote) : '<p class="text-harbour-400 italic">No case note generated.</p>' }}>
+                        </div>
+                    </div>
+
+                    {/* Navigation */}
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">
+                            ← Back to Case Note
+                        </button>
+                        <button 
+                            onClick={() => window.print()}
+                            className="px-6 py-3 rounded-xl bg-harbour-600 text-white hover:bg-harbour-700 font-semibold transition-colors"
+                        >
+                            🖨️ Print Report
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============== SCREEN 10: Generate Reports ==============
+        function Screen10_Reports({ clientInfo, evidence, functionalAssessment, diagnosticDecisions, caseNote, files, onBack }) {
+            const [generating, setGenerating] = useState(null);
+            const [generatedReports, setGeneratedReports] = useState({
+                caregiver: null,
+                teacher: null,
+                gp: null,
+                ndis: null
+            });
+            const [error, setError] = useState(null);
+
+            const reportTypes = [
+                { 
+                    key: 'caregiver', 
+                    label: 'Parent/Caregiver Report', 
+                    icon: '👨‍👩‍👧', 
+                    color: 'bg-purple-500 hover:bg-purple-600',
+                    desc: 'Family-friendly summary with home strategies'
+                },
+                { 
+                    key: 'teacher', 
+                    label: 'Teacher/School Report', 
+                    icon: '🏫', 
+                    color: 'bg-blue-500 hover:bg-blue-600',
+                    desc: 'Classroom strategies and educational adjustments'
+                },
+                { 
+                    key: 'gp', 
+                    label: 'GP Clinical Report', 
+                    icon: '⚕️', 
+                    color: 'bg-gold-500 hover:bg-gold-600',
+                    desc: 'Medical summary with referral recommendations'
+                },
+                { 
+                    key: 'ndis', 
+                    label: 'NDIS Supporting Evidence', 
+                    icon: '📋', 
+                    color: 'bg-amber-500 hover:bg-amber-600',
+                    desc: 'Functional capacity report for NDIS access'
+                }
+            ];
+
+            const generateReport = async (reportType) => {
+                setGenerating(reportType);
+                setError(null);
+
+                // Build documents object from files
+                const documents = {};
+                if (files && files.length > 0) {
+                    files.forEach(file => {
+                        if (file.text) {
+                            documents[file.name] = file.text;
+                        }
+                    });
+                }
+
+                try {
+                    const response = await fetch('/api/generate-report', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            reportType,
+                            clientInfo,
+                            evidence,
+                            functionalAssessment,
+                            diagnosticDecisions,
+                            caseNote,
+                            documents,
+                            model: 'llama-3.3-70b'
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    if (data.success) {
+                        setGeneratedReports(prev => ({
+                            ...prev,
+                            [reportType]: data.report
+                        }));
+                    } else {
+                        setError(`Failed to generate ${reportType} report: ${data.error}`);
+                    }
+                } catch (e) {
+                    setError(`Error: ${e.message}`);
+                }
+                setGenerating(null);
+            };
+
+            const downloadReport = (reportType, content) => {
+                const blob = new Blob([content], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const labels = { caregiver: 'Caregiver', teacher: 'Teacher', gp: 'GP', ndis: 'NDIS' };
+                a.download = `${clientInfo.name || 'Report'}_${labels[reportType]}_${new Date().toISOString().split('T')[0]}.md`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const copyReport = (content) => {
+                navigator.clipboard.writeText(content);
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="glass-card rounded-2xl shadow-lg p-6">
+                        <h2 className="text-xl font-bold flex items-center gap-2 text-harbour-700 mb-2">
+                            <span className="text-2xl">📨</span> Generate Reports
+                        </h2>
+                        <p className="text-harbour-500 text-sm">Generate tailored reports for different audiences from the assessment data</p>
+                    </div>
+
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+                            {error}
+                        </div>
+                    )}
+
+                    {/* Report Generation Buttons */}
+                    <div className="grid md:grid-cols-2 gap-4">
+                        {reportTypes.map(report => (
+                            <div key={report.key} className="glass-card rounded-xl p-4">
+                                <div className="flex items-start gap-3 mb-3">
+                                    <span className="text-3xl">{report.icon}</span>
+                                    <div className="flex-1">
+                                        <h3 className="font-semibold text-harbour-700">{report.label}</h3>
+                                        <p className="text-xs text-harbour-500">{report.desc}</p>
+                                    </div>
+                                </div>
+                                
+                                {!generatedReports[report.key] ? (
+                                    <button
+                                        onClick={() => generateReport(report.key)}
+                                        disabled={generating !== null}
+                                        className={`w-full py-3 px-4 rounded-lg text-white font-medium transition-colors ${report.color} disabled:opacity-50`}
+                                    >
+                                        {generating === report.key ? (
+                                            <span className="flex items-center justify-center gap-2">
+                                                <span className="animate-spin">⏳</span> Generating...
+                                            </span>
+                                        ) : (
+                                            <span>Generate {report.label}</span>
+                                        )}
+                                    </button>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => copyReport(generatedReports[report.key])}
+                                                className="flex-1 py-2 px-3 rounded-lg bg-harbour-100 hover:bg-harbour-200 text-harbour-700 text-sm font-medium"
+                                            >
+                                                📋 Copy
+                                            </button>
+                                            <button
+                                                onClick={() => downloadReport(report.key, generatedReports[report.key])}
+                                                className="flex-1 py-2 px-3 rounded-lg bg-harbour-100 hover:bg-harbour-200 text-harbour-700 text-sm font-medium"
+                                            >
+                                                📥 Download
+                                            </button>
+                                            <button
+                                                onClick={() => generateReport(report.key)}
+                                                disabled={generating !== null}
+                                                className="py-2 px-3 rounded-lg bg-harbour-100 hover:bg-harbour-200 text-harbour-700 text-sm font-medium"
+                                            >
+                                                🔄
+                                            </button>
+                                        </div>
+                                        <div className="text-xs text-gold-600">✓ Generated</div>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Preview Generated Reports */}
+                    {Object.entries(generatedReports).some(([k, v]) => v) && (
+                        <div className="glass-card rounded-2xl shadow-lg p-6">
+                            <h3 className="font-bold text-harbour-700 mb-4">Generated Reports Preview</h3>
+                            <div className="space-y-4">
+                                {reportTypes.map(report => generatedReports[report.key] && (
+                                    <details key={report.key} className="bg-harbour-50 rounded-lg" open>
+                                        <summary className="p-3 cursor-pointer font-medium text-harbour-700 hover:bg-harbour-100 rounded-lg">
+                                            {report.icon} {report.label}
+                                        </summary>
+                                        <div className="p-4 border-t border-harbour-200">
+                                            <div 
+                                                className="prose prose-sm max-w-none text-harbour-600 max-h-[400px] overflow-y-auto"
+                                                dangerouslySetInnerHTML={{ __html: marked.parse(generatedReports[report.key]) }}
+                                            />
+                                        </div>
+                                    </details>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Navigation */}
+                    <div className="flex justify-between">
+                        <button onClick={onBack} className="px-6 py-3 rounded-xl border border-harbour-300 hover:bg-white/50 text-harbour-600 transition-colors">
+                            ← Back to Export
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
