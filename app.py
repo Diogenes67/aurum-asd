@@ -15,7 +15,8 @@ import re
 import time
 from flask import Flask, request, jsonify, send_from_directory
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__, static_folder=BASE_DIR, static_url_path='')
 
 # Get HF token from environment
 HF_TOKEN = os.environ.get('HF_TOKEN', '')
@@ -24,11 +25,11 @@ HF_TOKEN = os.environ.get('HF_TOKEN', '')
 
 @app.route('/')
 def index():
-    return send_from_directory('.', 'asd_workflow_aurum.html')
+    return send_from_directory(BASE_DIR, 'asd_workflow_aurum.html')
 
 @app.route('/<path:path>')
 def static_files(path):
-    return send_from_directory('.', path)
+    return send_from_directory(BASE_DIR, path)
 
 # ============== API Endpoints ==============
 
